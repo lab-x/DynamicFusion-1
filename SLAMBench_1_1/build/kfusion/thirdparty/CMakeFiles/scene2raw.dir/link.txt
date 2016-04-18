@@ -1,0 +1,1 @@
+/usr/bin/c++    -g -O3      CMakeFiles/scene2raw.dir/scene2raw.cpp.o  -o scene2raw -rdynamic liblodepng.so -Wl,-rpath,/data/DynamicFusion/SLAMBench_1_1/build/kfusion/thirdparty 
