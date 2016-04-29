@@ -1012,8 +1012,7 @@ bool Kfusion::tracking(float4 k, float icp_threshold, uint tracking_rate,
 	bool rigid_return = checkPoseKernel(pose, oldPose, reductionoutput, computationSize,
 			track_threshold);
 
-	bool rigid_return = non_rigid_track(vertex, normal, n_warp, computationSize, getCameraMatrix(k), inputVertex[0]);
-
+	bool rigid_return = non_rigid_track(vertex, normal, n_warp, computationSize, getCameraMatrix(k), inputVertex[0], pose);
 
 }
 
@@ -1023,14 +1022,25 @@ void so3Matrix(Eigen::Matrix3d* rm, Eigen::Vector3d v) {
 	-v[1], v[0], 0;
 }
 
+void matrix4ToEigen(Eigen::Matrix4d* o, Matrix4 i) {
+	for (int i = 0; i < 4; i++) {
+		float4 row = i.data[i];
+		*o << row.x, row.y, row.z, row.w;
+	}
+}
 /*dynamic fusion*/
-bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size, Matrix4 cameraMatrix, float3* inputVertex) {
+bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size, Matrix4 cameraMatrix, float3* inputVertex, Matrix4 pose) {
 	// Reg term
 	int n_dp = sizeof(n_warp)/sizeof(*n_warp);
 
 	Eigen::SparseMatrix<double> A_reg(n_dp * k_n * 3, n_dp * 6);
 	Eigen::VectorXd b_reg(n_dp * k_n * 3);
 	A_reg.setZero();
+
+	Eigen::Matrix4d rigid_t;
+	matrix4ToEigen(&rigid_t, pose);
+	//kfusion transform current frame to canonical form while dfusion in the opposite
+	rigid_t = rigid_t.inverse();
 
 	for (int i = 0; i < n_dp; ++i) {
 		int kNear[k_n];
@@ -1041,7 +1051,7 @@ bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size, M
 			double alpha = n_warp[j].w > n_warp[i].w ? n_warp[j].w : n_warp[i].w;
 			double con_a = pow(alpha, 0.5);
 
-			Eigen::Vector3d ridgv =  n_warp[i].se3.block(0,0,2,2) * n_warp[j].v;
+			Eigen::Vector3d ridgv =  rigid_t.block(0,0,2,2) * n_warp[j].v;
 
 			A_reg.coeffRef((i * k_n + k)*3, i*3) = 0;
 			A_reg.coeffRef((i * k_n + k)*3 + 1, i*3) = -con_a * ridgv[2];
@@ -1059,7 +1069,7 @@ bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size, M
 			A_reg.coeffRef((i * k_n + k)*3 + 1, (i+1)*3 + 1) = con_a;
 			A_reg.coeffRef((i * k_n + k)*3 + 2, (i+1)*3 + 2) = con_a;
 
-			Eigen::Vector3d rjdgv =  n_warp[j].se3.block(0,0,2,2) * n_warp[j].v;
+			Eigen::Vector3d rjdgv =  rigid_t.block(0,0,2,2) * n_warp[j].v;
 
 			A_reg.coeffRef((i * k_n + k)*3, j*3) = 0;
 			A_reg.coeffRef((i * k_n + k)*3 + 1, j*3) = con_a * rjdgv[2];
@@ -1077,8 +1087,8 @@ bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size, M
 			A_reg.coeffRef((i * k_n + k)*3 + 1, (j+1)*3 + 1) = -con_a;
 			A_reg.coeffRef((i * k_n + k)*3 + 2, (j+1)*3 + 2) = -con_a;
 
-			Eigen::Vector3d ti =  n_warp[i].se3.block(0,3,2,3);
-			Eigen::Vector3d tj =  n_warp[j].se3.block(0,3,2,3);
+			Eigen::Vector3d ti =  rigid_t.block(0,3,2,3);
+			Eigen::Vector3d tj =  rigid_t.block(0,3,2,3);
 			Eigen::Vector3d t =  con_a * (ridgv - rjdgv + ti - tj);
 
 			b_reg((i * k_n + k)*3) = t[0];
@@ -1104,10 +1114,8 @@ bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size, M
 			Eigen::Matrix4d w;
 			getWarpMatrix(&w, v_u);
 			Eigen::Matrix4d eigenCameraMatrix;
-			for (int i = 0; i < 4; i++) {
-				float4 row = cameraMatrix.data[i];
-				eigenCameraMatrix << row.x, row.y, row.z, row.w;
-			}
+			matrix4ToEigen(&eigenCameraMatrix, cameraMatrix);
+
 			Eigen::Vector3d projected_u_hat = eigenCameraMatrix * (w * v_u);
 			Eigen::Vector2i pixel_u;
 			pixel_u << int(projected_u_hat[0] / projected_u_hat[2] + 0.5),
@@ -1126,8 +1134,8 @@ bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size, M
 
 			for (int k = 0; k < k_n; k++) {
 				n_i d_p = n_warp[kNear[k]];
-				C_n += d_p.w * d_p.se3.block(0,0,2,2) * n_u;
-				C_v += d_p.w * (d_p.se3.block(0,0,2,2) * v_u + d_p.se3.block(0,3,2,3));
+				C_n += d_p.w * rigid_t.block(0,0,2,2) * n_u;
+				C_v += d_p.w * (rigid_t.block(0,0,2,2) * v_u + rigid_t.block(0,3,2,3));
 
 				eta += d_p.w;
 			}
