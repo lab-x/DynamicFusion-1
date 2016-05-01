@@ -1012,7 +1012,7 @@ bool Kfusion::tracking(float4 k, float icp_threshold, uint tracking_rate,
 	bool rigid_return = checkPoseKernel(pose, oldPose, reductionoutput, computationSize,
 			track_threshold);
 
-	bool rigid_return = non_rigid_track(vertex, normal, n_warp, computationSize, getCameraMatrix(k), inputVertex[0], pose);
+	bool non_rigid_return = non_rigid_track(vertex, normal, n_warp, computationSize, getCameraMatrix(k), inputVertex[0], pose);
 
 }
 
@@ -1032,6 +1032,16 @@ void matrix4ToEigen(Eigen::Matrix4d* o, Matrix4 i) {
 bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size, Matrix4 cameraMatrix, float3* inputVertex, Matrix4 pose) {
 	// Reg term
 	int n_dp = sizeof(n_warp)/sizeof(*n_warp);
+
+	//reset n_warp
+	for(int i = 0; i < n_warp; i++) {
+		Eigen::Matrix4d temp;
+		temp << 1,0,0,0,
+				0,1,0,0,
+				0,0,1,0,
+				0,0,0,1;
+		n_warp[i].se3 = temp;
+	}
 
 	Eigen::SparseMatrix<double> A_reg(n_dp * k_n * 3, n_dp * 6);
 	Eigen::VectorXd b_reg(n_dp * k_n * 3);
@@ -1149,11 +1159,11 @@ bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size, M
 			for (int k = 0; k < k_n; k++) {
 				n_i d_p = n_warp[kNear[k]];
 
-				Eigen::Vector3d rn = d_p.se3.block(0,0,2,2) * n_u;
+				Eigen::Vector3d rn = rigid_t.block(0,0,2,2) * n_u;
 				Eigen::Matrix3d rnm;
 				so3Matrix(&rnm, rn);
 
-				Eigen::Vector3d rv = d_p.se3.block(0,0,2,2) * v_u;
+				Eigen::Vector3d rv = rigid_t.block(0,0,2,2) * v_u;
 				Eigen::Matrix3d rvm;
 				so3Matrix(&rvm, rv);
 
@@ -1177,8 +1187,8 @@ bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size, M
 		}
 	}
 
-	float w_data = 0.01;
-	float w_reg = 0.0001 * 200;
+	float w_data = 1;
+	float w_reg = 200;
 
 	Eigen::CholmodSimplicialLDLT< Eigen::SparseMatrix<double> > solver;
 	solver.compute(w_reg * A_reg.transpose()*A_reg + w_data * A_data.transpose()*A_data);
@@ -1207,23 +1217,19 @@ bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size, M
 	    // Get the translation update
 	    Eigen::Vector3d t_i(x_update(6*i+3), x_update(6*i+4), x_update(6*i+5));
 
-	    Eigen::Matrix3d u_r;
-	    so3Matrix(&u_r, so3_i);
 
 	    Eigen::Matrix3d o_r = n_warp[i].se3.block(0,0,2,2);
 	    Eigen::Vector3d o_t = n_warp[i].se3.block(0,3,2,3);
 
-	    Eigen::Matrix4d n_
-	              R_matrices.at(i)    = TooN::SO3<>(so3_i)*R_matrices.at(i);
+	    Eigen::Matrix3d n_r = so3_i * o_r;
+	    Eigen::Vector3d n_t = o_t + t_i;
 
-	            translations.at(i)    = translations.at(i) + t_i;
-
-	            TooN::SE3<>pose       = TooN::SE3<>(R_matrices.at(i),translations.at(i));
-
-	//            std::cout<<"pose("<<i<<") = "<< pose << std::endl;
-	        }
-
-
+	    Eigen::Matrix4d n_w;
+	    n_w << n_r, n_t,
+	    	   0,0,0,1;
+	    n_warp[i].se3 = n_w;
+	    std::cout<<"pose("<<i<<") = "<< n_w << std::endl;
+	}
 
 }
 
