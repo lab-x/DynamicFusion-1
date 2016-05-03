@@ -9,7 +9,7 @@ find_package(GLUT   )
 find_package(OpenGL )
 find_package(OpenNI2)
 find_package(Eigen3 REQUIRED)
-
+find_package(Cholmod)
 find_package(PkgConfig)
 find_package(Qt5Core)
 find_package(Qt5Widgets)
@@ -18,7 +18,6 @@ find_package(Qt5OpenGL)
 find_package(Qt5PrintSupport)
 
 include_directories(./include ${TOON_INCLUDE_PATHS} ./thirdparty)
-
 
  # ---- PREPARE COMMON DEPENDENCIES  ------------ 
 if(APPLE)
@@ -48,13 +47,21 @@ SET_TARGET_PROPERTIES(${appname}-openmp PROPERTIES COMPILE_FLAGS "-fopenmp")
 add_version(${appname} openmp "-fopenmp" "-fopenmp")
 
 
+
+#------CHOLMOD Version-----#
+message(${CHOLMOD_LIBRARIES})
+include_directories(${CHOLMOD_INCLUDE_DIR})
+add_library(${appname}-cholmod  src/cpp/kernels.cpp)
+target_link_libraries(${appname}-cholmod ${CHOLMOD_LIBRARIES})	
+add_version(${appname} cholmod "" "")
 #------Eigen Version-----#
 
 if(EIGEN3_FOUND)
 include_directories(${EIGEN3_INCLUDE_DIR})
 endif(EIGEN3_FOUND)
 
- #  ----------------- OCL VERSION ----------------- 
+
+#  ----------------- OCL VERSION ----------------- 
  
 if (OPENCL_FOUND) 
    include_directories(${OPENCL_INCLUDE_DIRS})

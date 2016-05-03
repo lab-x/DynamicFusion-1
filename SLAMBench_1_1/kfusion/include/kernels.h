@@ -12,6 +12,7 @@
 
 #include <cstdlib>
 #include <commons.h>
+#include <Eigen/CholmodSupport>
 #include <Eigen/Eigenvalues>
 #include <Eigen/Sparse>
 #include <Eigen/SparseCholesky>
@@ -56,29 +57,6 @@ void raycastKernel(float3* vertex, float3* normal, uint2 inputSize,
 		const Volume integration, const Matrix4 view, const float nearPlane,
 		const float farPlane, const float step, const float largestep);
 
-/*dynamic fusion*/
-struct n_i {
-	Eigen::Vector3d v;
-	float w;
-	Eigen::Matrix4d se3;
-};
-
-n_i * n_warp;
-
-struct n_reg {
-	n_i ** data;
-	int ** edges;
-	int level;
-};
-
-void findKnearestPointIndex(int* out, n_i* n_warp, Eigen::Vector3d x);
-
-void getWarpMatrix(Eigen::Matrix4d* out, Eigen::Vector3d x);
-
-void non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size,
-		Matrix4 cameraMatrix, float3* inputVertex);
-
-void so3Matrix(Eigen::Matrix3d* rm, Eigen::Vector3d v);
 
 ////////////////////////// RENDER KERNELS PROTOTYPES //////////////////////
 

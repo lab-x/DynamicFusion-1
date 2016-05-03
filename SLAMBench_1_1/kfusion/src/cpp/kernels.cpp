@@ -54,6 +54,30 @@ Matrix4 raycastPose;
 float3 ** inputVertex;
 float3 ** inputNormal;
 
+/*dynamic fusion*/
+struct n_i {
+	Eigen::Vector3d v;
+	float w;
+	Eigen::Matrix4d se3;
+};
+
+n_i * n_warp;
+
+struct n_reg {
+	n_i ** data;
+	int ** edges;
+	int level;
+};
+
+void findKnearestPointIndex(int* out, n_i* n_warp, Eigen::Vector3d x);
+
+void getWarpMatrix(Eigen::Matrix4d* out, Eigen::Vector3d x);
+
+bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size,
+		Matrix4 cameraMatrix, float3* inputVertex, Matrix4 pose);
+
+void so3Matrix(Eigen::Matrix3d* rm, Eigen::Vector3d v);
+
 
 bool print_kernel_timing = false;
 #ifdef __APPLE__
@@ -641,7 +665,7 @@ void findKnearestPointIndex(int* out, n_i* n_warp, Eigen::Vector3d x) {
 
 /*dynamic fusion*/
 void getWarpMatrix(Eigen::Matrix4d* out, Eigen::Vector3d x) {
-	//Eigen::VectorXd bq;        ;
+	//Eigen::VectorXd bq;
 	Eigen::Matrix4d bm = Eigen::Matrix4d::Zero();
 	// Get k nearest points
 	int kNear[k_n];
@@ -1023,8 +1047,8 @@ void so3Matrix(Eigen::Matrix3d* rm, Eigen::Vector3d v) {
 }
 
 void matrix4ToEigen(Eigen::Matrix4d* o, Matrix4 i) {
-	for (int i = 0; i < 4; i++) {
-		float4 row = i.data[i];
+	for (int k = 0; k < 4; k++) {
+		float4 row = i.data[k];
 		*o << row.x, row.y, row.z, row.w;
 	}
 }
@@ -1034,7 +1058,7 @@ bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size, M
 	int n_dp = sizeof(n_warp)/sizeof(*n_warp);
 
 	//reset n_warp
-	for(int i = 0; i < n_warp; i++) {
+	for(int i = 0; i < n_dp; i++) {
 		Eigen::Matrix4d temp;
 		temp << 1,0,0,0,
 				0,1,0,0,
@@ -1126,7 +1150,8 @@ bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size, M
 			Eigen::Matrix4d eigenCameraMatrix;
 			matrix4ToEigen(&eigenCameraMatrix, cameraMatrix);
 
-			Eigen::Vector3d projected_u_hat = eigenCameraMatrix * (w * v_u);
+			Eigen::Vector3d projected_u_hat = eigenCameraMatrix.block(0,0,2,2) * (w.block(0,0,2,2) * v_u + w.block(0,3,2,3))
+					+ eigenCameraMatrix.block(0,3,2,3);
 			Eigen::Vector2i pixel_u;
 			pixel_u << int(projected_u_hat[0] / projected_u_hat[2] + 0.5),
 					int(projected_u_hat[1] / projected_u_hat[2] + 0.5);
@@ -1173,13 +1198,13 @@ bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size, M
 				Eigen::RowVector3d c_t = d_p.w / eta * C_n.transpose();
 
 				int j = kNear[k];
-				A_data.coeff(pixelx + pixely * size.x, j*3) = c_r[0];
-				A_data.coeff(pixelx + pixely * size.x, j*3 + 1) = c_r[1];
-				A_data.coeff(pixelx + pixely * size.x, j*3 + 2) = c_r[2];
+				A_data.coeffRef(pixelx + pixely * size.x, j*3) = c_r[0];
+				A_data.coeffRef(pixelx + pixely * size.x, j*3 + 1) = c_r[1];
+				A_data.coeffRef(pixelx + pixely * size.x, j*3 + 2) = c_r[2];
 
-				A_data.coeff(pixelx + pixely * size.x, (j + 1)*3) = c_t[0];
-				A_data.coeff(pixelx + pixely * size.x, (j + 1)*3 + 1) = c_t[1];
-				A_data.coeff(pixelx + pixely * size.x, (j + 1)*3 + 2) = c_t[2];
+				A_data.coeffRef(pixelx + pixely * size.x, (j + 1)*3) = c_t[0];
+				A_data.coeffRef(pixelx + pixely * size.x, (j + 1)*3 + 1) = c_t[1];
+				A_data.coeffRef(pixelx + pixely * size.x, (j + 1)*3 + 2) = c_t[2];
 			}
 
 			b_data(pixelx + pixely * size.x) = C_n.transpose() * D_v;
@@ -1190,10 +1215,10 @@ bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size, M
 	float w_data = 1;
 	float w_reg = 200;
 
-	Eigen::CholmodSimplicialLDLT< Eigen::SparseMatrix<double> > solver;
+	Eigen::CholmodSimplicialLDLT< Eigen::SparseMatrix<double> >solver;
 	solver.compute(w_reg * A_reg.transpose()*A_reg + w_data * A_data.transpose()*A_data);
 
-	if(solver.info() != Success)
+	if(solver.info() != Eigen::Success)
 	{
 	    // decomposition failed
 	    std::cout<<"Decomposition failed" << std::endl;
@@ -1217,11 +1242,13 @@ bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size, M
 	    // Get the translation update
 	    Eigen::Vector3d t_i(x_update(6*i+3), x_update(6*i+4), x_update(6*i+5));
 
+	    Eigen::Matrix3d r_i;
+  	    so3Matrix(&r_i, so3_i);
 
 	    Eigen::Matrix3d o_r = n_warp[i].se3.block(0,0,2,2);
 	    Eigen::Vector3d o_t = n_warp[i].se3.block(0,3,2,3);
 
-	    Eigen::Matrix3d n_r = so3_i * o_r;
+	    Eigen::Matrix3d n_r = r_i * o_r;
 	    Eigen::Vector3d n_t = o_t + t_i;
 
 	    Eigen::Matrix4d n_w;
