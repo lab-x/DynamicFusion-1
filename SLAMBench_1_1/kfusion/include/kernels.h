@@ -16,6 +16,7 @@
 #include <Eigen/Eigenvalues>
 #include <Eigen/Sparse>
 #include <Eigen/SparseCholesky>
+#include <limits.h>
 ////////////////////////// COMPUTATION KERNELS PROTOTYPES //////////////////////
 
 void initVolumeKernel(Volume volume);

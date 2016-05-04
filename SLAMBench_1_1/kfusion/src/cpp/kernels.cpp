@@ -61,7 +61,7 @@ struct n_i {
 	Eigen::Matrix4d se3;
 };
 
-n_i * n_warp;
+std::vector<n_i> n_warp;
 
 struct n_reg {
 	n_i ** data;
@@ -69,15 +69,18 @@ struct n_reg {
 	int level;
 };
 
-void findKnearestPointIndex(int* out, n_i* n_warp, Eigen::Vector3d x);
+void findKnearestPointIndex(int* out, std::vector<n_i> n_warp, Eigen::Vector3d x);
 
 void getWarpMatrix(Eigen::Matrix4d* out, Eigen::Vector3d x);
 
-bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size,
+bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, uint2 size,
 		Matrix4 cameraMatrix, float3* inputVertex, Matrix4 pose);
 
 void so3Matrix(Eigen::Matrix3d* rm, Eigen::Vector3d v);
 
+void matrix4ToEigen(Eigen::Matrix4d* o, Matrix4 i);
+
+void eigenTomatrix4(Matrix4& o, Eigen::Matrix4d i);
 
 bool print_kernel_timing = false;
 #ifdef __APPLE__
@@ -648,27 +651,43 @@ void halfSampleRobustImageKernel(float* out, const float* in, uint2 inSize,
 }
 
 /*dynamic fusion*/
-void findKnearestPointIndex(int* out, n_i* n_warp, Eigen::Vector3d x) {
+void findKnearestPointIndex(int* out, std::vector<n_i> n_warp, Eigen::Vector3d x) {
+	int n_size = n_warp.size;
+	if (n_size == 0) {
+		return;
+	}
 	for (uint k = 0; k < k_n; ++k) {
 		int min = k;
 		float min_d = (n_warp[min].v - x).norm();
-		for(uint i = k + 1; i < sizeof(n_warp)/sizeof(*n_warp); ++i) {
+		for(uint i = k + 1; i < n_size; ++i) {
 			float d = (n_warp[i].v - x).norm();
 			if (d < min_d) {
 				min = i;
 				min_d = d;
 			}
 		}
-		out[k] = min;
+		n_i temp = n_warp[min];
+		n_warp[min] = n_warp[k];
+		n_warp[k] = temp;
+		out[k] = k;
 	}
 }
 
 /*dynamic fusion*/
 void getWarpMatrix(Eigen::Matrix4d* out, Eigen::Vector3d x) {
+	if (n_warp.size() == 0) {
+		*out << 1,0,0,0,
+			   0,1,0,0,
+			   0,0,1,0,
+			   0,0,0,1;
+		return;
+	}
+
+
 	//Eigen::VectorXd bq;
 	Eigen::Matrix4d bm = Eigen::Matrix4d::Zero();
 	// Get k nearest points
-	int kNear[k_n];
+	int kNear[k_n] = {};
 	findKnearestPointIndex(kNear, n_warp, x);
 	// blend them
 	for (uint k = 0; k < k_n; ++k) {
@@ -706,13 +725,25 @@ void integrateKernel(Volume vol, const float* depth, uint2 depthSize,
 		for (unsigned int x = 0; x < vol.size.x; x++) {
 
 			uint3 pix = make_uint3(x, y, 0); //pix.x = x;pix.y = y;
-			float3 pos = invTrack * vol.pos(pix);
-			float3 cameraX = K * pos;
 
 			for (pix.z = 0; pix.z < vol.size.z;
-					++pix.z, pos += delta, cameraX += cameraDelta) {
+					//++pix.z, pos += delta, cameraX += cameraDelta) {
+					++pix.z) {
+
+				Eigen::Vector3d e_x(vol.pos(pix).x, vol.pos(pix).y, vol.pos(pix).z);
+				Eigen::Matrix4d defT;
+				getWarpMatrix(&defT, e_x);
+
+				Eigen::Vector3d e_xt = defT.block(0,0,2,2) * e_x + defT.block(0,3,2,3);
+				float pos_1 = e_xt(0);
+				float pos_2 = e_xt(1);
+				float pos_3 = e_xt(2);
+				float3 pos = invTrack * make_float3(pos_1, pos_2, pos_3);
+				float3 cameraX = K * pos;
+
 				if (pos.z < 0.0001f) // some near plane constraint
-					continue;
+									continue;
+
 				const float2 pixel = make_float2(cameraX.x / cameraX.z + 0.5f,
 						cameraX.y / cameraX.z + 0.5f);
 				if (pixel.x < 0 || pixel.x > depthSize.x - 1 || pixel.y < 0
@@ -727,10 +758,12 @@ void integrateKernel(Volume vol, const float* depth, uint2 depthSize,
 										1 + sq(pos.x / pos.z)
 												+ sq(pos.y / pos.z));
 				if (diff > -mu) {
-					const float sdf = fminf(1.f, diff / mu);
+					const float sdf = fminf(mu, diff);
 					float2 data = vol[pix];
-					data.x = clamp((data.y * data.x + sdf) / (data.y + 1), -1.f,
+					// TODO 1 should be weight w(x) 3.2-6
+					data.x = clamp((data.y * data.x + sdf * sdf) / (data.y + 1), -1.f,
 							1.f);
+					// TODO 1 should be weight w(x) 3.2-6
 					data.y = fminf(data.y + 1, maxweight);
 					vol.set(pix, data);
 				}
@@ -741,6 +774,22 @@ void integrateKernel(Volume vol, const float* depth, uint2 depthSize,
 float4 raycast(const Volume volume, const uint2 pos, const Matrix4 view,
 		const float nearPlane, const float farPlane, const float step,
 		const float largestep) {
+
+	// Volume: canonical?
+	// TODO need to convert volume
+	/*
+			uint3 pix = make_uint3(x, y, 0); //pix.x = x;pix.y = y;
+			Eigen::Vector3d e_x(integration.pos(pix).x, integration.pos(pix).y, integration.pos(pix).z);
+			Eigen::Matrix4d defT;
+			getWarpMatrix(&defT, e_x);
+
+			Eigen::Matrix4d eigenRigid;
+			matrix4ToEigen(&eigenRigid, m4view);
+			Eigen::Matrix4d eigenView = defT * eigenRigid;
+
+			Matrix4 view;
+			eigenTomatrix4(&view, eigenView);
+	 */
 
 	const float3 origin = get_translation(view);
 	const float3 direction = rotate(view, make_float3(pos.x, pos.y, 1.f));
@@ -820,6 +869,35 @@ void raycastKernel(float3* vertex, float3* normal, uint2 inputSize,
 						0);
 			}
 		}
+
+	// std::vector<Eigen::Vector3d> uncovered;
+	// TODO probably need better way to downsample that dgw not constant with eps
+
+	for (int i = 0; i < inputSize.x * inputSize.y; i++) {
+		Eigen::Vector3d v_c(vertex[i].x, vertex[i].y, vertex[i].z);
+		int kNear[k_n] = {};
+		findKnearestPointIndex(kNear, n_warp, v_c);
+		double min_dis = std::numeric_limits<double>::max();
+		for (int k = 0; k < k_n; k++) {
+			if (n_warp.size() == 0) {
+				break;
+			}
+			double dis = (n_warp[kNear[k]].v - v_c).norm() / n_warp[kNear[k]].w;
+			min_dis = dis < min_dis ? dis : min_dis;
+		}
+		if (min_dis >=1) {
+			n_i dgnew;
+			dgnew.v = v_c;
+			Eigen::Matrix4d wm;
+			getWarpMatrix(&wm, v_c);
+			dgnew.se3 = wm;
+			dgnew.w = eps;
+			n_warp.push_back(dgnew);
+		}
+	}
+
+	}
+
 	TOCK("raycastKernel", inputSize.x * inputSize.y);
 }
 
@@ -1052,10 +1130,24 @@ void matrix4ToEigen(Eigen::Matrix4d* o, Matrix4 i) {
 		*o << row.x, row.y, row.z, row.w;
 	}
 }
+
+void eigenTomatrix4(Matrix4* o, Eigen::Matrix4d i) {
+	for (int k = 0; k < 4; k++) {
+		(*o).data[k].x = i(k, 0);
+		(*o).data[k].y = i(k, 1);
+		(*o).data[k].z = i(k, 2);
+		(*o).data[k].w = i(k, 3);
+	}
+}
+
 /*dynamic fusion*/
-bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size, Matrix4 cameraMatrix, float3* inputVertex, Matrix4 pose) {
+bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, uint2 size, Matrix4 cameraMatrix, float3* inputVertex, Matrix4 pose) {
+	if (n_warp.size() == 0) {
+		return true;
+	}
+
 	// Reg term
-	int n_dp = sizeof(n_warp)/sizeof(*n_warp);
+	int n_dp = n_warp.size();
 
 	//reset n_warp
 	for(int i = 0; i < n_dp; i++) {
@@ -1077,7 +1169,7 @@ bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size, M
 	rigid_t = rigid_t.inverse();
 
 	for (int i = 0; i < n_dp; ++i) {
-		int kNear[k_n];
+		int kNear[k_n] = {};
 		findKnearestPointIndex(kNear, n_warp, n_warp[i].v);
 		for (int k = 0; k < k_n; k++) {
 
@@ -1160,7 +1252,7 @@ bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size, M
 				continue;
 			}
 
-			int kNear[k_n];
+			int kNear[k_n] = {};
 			findKnearestPointIndex(kNear, n_warp, v_u);
 
 			Eigen::Vector3d C_n(0, 0, 0);
@@ -1258,6 +1350,7 @@ bool non_rigid_track(float3* vertex, float3* normal, n_i * n_warp, uint2 size, M
 	    std::cout<<"pose("<<i<<") = "<< n_w << std::endl;
 	}
 
+	return true;
 }
 
 bool Kfusion::raycasting(float4 k, float mu, uint frame) {
