@@ -34,13 +34,11 @@ if (OPENNI2_FOUND)
 endif(OPENNI2_FOUND)
 
 
-
   #  ------ BENCHMARK --------
   add_executable(${appname}-benchmark-${version} src/benchmark.cpp src/PowerMonitor.cpp)
   target_link_libraries(${appname}-benchmark-${version} ${appname}-${version} ${main_common_libraries})
   SET_TARGET_PROPERTIES(${appname}-benchmark-${version}
                              PROPERTIES COMPILE_FLAGS "${main_common_compile_flags}")
-
 
 #  ------ MAIN --------
   if (GLUT_FOUND)
@@ -98,8 +96,8 @@ endif(APPLE)
   endif(Qt5OpenGL_FOUND)
 
 endfunction()
-
-
 add_subdirectory( kfusion )
+
+
 
 

@@ -12,7 +12,7 @@
 #include <mach/clock.h>
 #include <mach/mach.h>
 
-	
+
 	#define TICK()    {if (print_kernel_timing) {\
 		host_get_clock_service(mach_host_self(), SYSTEM_CLOCK, &cclock);\
 		clock_get_time(cclock, &tick_clockData);\
@@ -27,10 +27,10 @@
 		if((tock_clockData.tv_sec > tick_clockData.tv_sec) && (tock_clockData.tv_nsec >= tick_clockData.tv_nsec))   std::cerr<< tock_clockData.tv_sec - tick_clockData.tv_sec << std::setfill('0') << std::setw(9);\
 		std::cerr  << (( tock_clockData.tv_nsec - tick_clockData.tv_nsec) + ((tock_clockData.tv_nsec<tick_clockData.tv_nsec)?1000000000:0)) << " " <<  size << std::endl;}}
 #else
-	
-	#define TICK()    {if (print_kernel_timing) {clock_gettime(CLOCK_MONOTONIC, &tick_clockData);}}
 
-	#define TOCK(str,size)  {if (print_kernel_timing) {clock_gettime(CLOCK_MONOTONIC, &tock_clockData); std::cerr<< str << " ";\
+	#define TICK() {if (print_kernel_timing) {clock_gettime(CLOCK_MONOTONIC, &tick_clockData);}}
+
+	#define TOCK(str,size) {if (print_kernel_timing) {clock_gettime(CLOCK_MONOTONIC, &tock_clockData); std::cerr<< str << " ";\
 		if((tock_clockData.tv_sec > tick_clockData.tv_sec) && (tock_clockData.tv_nsec >= tick_clockData.tv_nsec))   std::cerr<< tock_clockData.tv_sec - tick_clockData.tv_sec << std::setfill('0') << std::setw(9);\
 		std::cerr  << (( tock_clockData.tv_nsec - tick_clockData.tv_nsec) + ((tock_clockData.tv_nsec<tick_clockData.tv_nsec)?1000000000:0)) << " " <<  size << std::endl;}}
 
@@ -91,7 +91,7 @@ bool print_kernel_timing = false;
 	struct timespec tick_clockData;
 	struct timespec tock_clockData;
 #endif
-	
+
 void Kfusion::languageSpecificConstructor() {
 
 	if (getenv("KERNEL_TIMINGS"))
@@ -652,7 +652,7 @@ void halfSampleRobustImageKernel(float* out, const float* in, uint2 inSize,
 
 /*dynamic fusion*/
 void findKnearestPointIndex(int* out, std::vector<n_i> n_warp, Eigen::Vector3d x) {
-	int n_size = n_warp.size;
+	int n_size = n_warp.size();
 	if (n_size == 0) {
 		return;
 	}
@@ -896,7 +896,6 @@ void raycastKernel(float3* vertex, float3* normal, uint2 inputSize,
 		}
 	}
 
-	}
 
 	TOCK("raycastKernel", inputSize.x * inputSize.y);
 }
@@ -1310,6 +1309,7 @@ bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, ui
 	Eigen::CholmodSimplicialLDLT< Eigen::SparseMatrix<double> >solver;
 	solver.compute(w_reg * A_reg.transpose()*A_reg + w_data * A_data.transpose()*A_data);
 
+	/*
 	if(solver.info() != Eigen::Success)
 	{
 	    // decomposition failed
@@ -1348,8 +1348,7 @@ bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, ui
 	    	   0,0,0,1;
 	    n_warp[i].se3 = n_w;
 	    std::cout<<"pose("<<i<<") = "<< n_w << std::endl;
-	}
-
+	} */
 	return true;
 }
 

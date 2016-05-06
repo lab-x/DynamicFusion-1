@@ -16,6 +16,7 @@ find_package(Qt5Widgets)
 find_package(Qt5Gui)
 find_package(Qt5OpenGL)
 find_package(Qt5PrintSupport)
+find_package(SuiteSparse)
 
 include_directories(./include ${TOON_INCLUDE_PATHS} ./thirdparty)
 
@@ -30,8 +31,8 @@ endif(APPLE)
 set(common_compile_flags "")
 
 
-
-
+message(${CSPARSE_INCLUDE_DIR})
+message(${CSPARSE_LIBRARY})
 
  # ----------------- CPP VERSION ----------------- 
 
@@ -46,20 +47,18 @@ target_link_libraries(${appname}-openmp   ${common_libraries})
 SET_TARGET_PROPERTIES(${appname}-openmp PROPERTIES COMPILE_FLAGS "-fopenmp")
 add_version(${appname} openmp "-fopenmp" "-fopenmp")
 
-
-
-#------CHOLMOD Version-----#
-message(${CHOLMOD_LIBRARIES})
-include_directories(${CHOLMOD_INCLUDE_DIR})
-add_library(${appname}-cholmod  src/cpp/kernels.cpp)
-link_directories(${CHOLMOD_LIBRARIES})
-target_link_libraries(${appname}-cholmod ${CHOLMOD_LIBRARIES})	
-add_version(${appname} cholmod "" "")
 #------Eigen Version-----#
 
 if(EIGEN3_FOUND)
 include_directories(${EIGEN3_INCLUDE_DIR})
 endif(EIGEN3_FOUND)
+
+#------CHOLMOD Version-----#
+include_directories(${SuiteSparse_INCLUDE_DIRS})
+add_library(${appname}-CSPARSE  src/cpp/kernels.cpp)
+target_link_libraries(${appname}-CSPARSE ${common_libraries} ${SuiteSparse_LIBRARIES} )	
+add_version(${appname} CSPARSE "" "")
+
 
 
 #  ----------------- OCL VERSION ----------------- 
