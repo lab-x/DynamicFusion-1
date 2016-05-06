@@ -55,6 +55,8 @@ float3 ** inputVertex;
 float3 ** inputNormal;
 
 /*dynamic fusion*/
+Eigen::Matrix4d cur_pose;
+
 struct n_i {
 	Eigen::Vector3d v;
 	float w;
@@ -74,7 +76,7 @@ void findKnearestPointIndex(int* out, std::vector<n_i> n_warp, Eigen::Vector3d x
 void getWarpMatrix(Eigen::Matrix4d* out, Eigen::Vector3d x);
 
 bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, uint2 size,
-		Matrix4 cameraMatrix, float3* inputVertex, Matrix4 pose);
+		Matrix4 cameraMatrix, float3* inputVertex);
 
 void so3Matrix(Eigen::Matrix3d* rm, Eigen::Vector3d v);
 
@@ -652,7 +654,7 @@ void halfSampleRobustImageKernel(float* out, const float* in, uint2 inSize,
 
 /*dynamic fusion*/
 void findKnearestPointIndex(int* out, std::vector<n_i> n_warp, Eigen::Vector3d x) {
-	int n_size = n_warp.size;
+	int n_size = n_warp.size();
 	if (n_size == 0) {
 		return;
 	}
@@ -896,7 +898,6 @@ void raycastKernel(float3* vertex, float3* normal, uint2 inputSize,
 		}
 	}
 
-	}
 
 	TOCK("raycastKernel", inputSize.x * inputSize.y);
 }
@@ -910,6 +911,11 @@ bool updatePoseKernel(Matrix4 & pose, const float * output,
 	TooN::Vector<6> x = solve(values[0].slice<1, 27>());
 	TooN::SE3<> delta(x);
 	pose = toMatrix4(delta) * pose;
+
+	Matrix4 del_m4 = toMatrix4(delta);
+	Eigen::Matrix4d del_e;
+	matrix4ToEigen(&del_e, del_m4);
+	cur_pose *= del_e;
 
 	// Return validity test result of the tracking
 	if (norm(x) < icp_threshold)
@@ -1091,6 +1097,7 @@ bool Kfusion::tracking(float4 k, float icp_threshold, uint tracking_rate,
 
 	oldPose = pose;
 	const Matrix4 projectReference = getCameraMatrix(k) * inverse(raycastPose);
+	cur_pose = Eigen::Matrix4d::Identity();
 
 	for (int level = iterations.size() - 1; level >= 0; --level) {
 		uint2 localimagesize = make_uint2(
@@ -1114,7 +1121,7 @@ bool Kfusion::tracking(float4 k, float icp_threshold, uint tracking_rate,
 	bool rigid_return = checkPoseKernel(pose, oldPose, reductionoutput, computationSize,
 			track_threshold);
 
-	bool non_rigid_return = non_rigid_track(vertex, normal, n_warp, computationSize, getCameraMatrix(k), inputVertex[0], pose);
+	bool non_rigid_return = non_rigid_track(vertex, normal, n_warp, computationSize, getCameraMatrix(k), inputVertex[0]);
 
 }
 
@@ -1141,7 +1148,7 @@ void eigenTomatrix4(Matrix4* o, Eigen::Matrix4d i) {
 }
 
 /*dynamic fusion*/
-bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, uint2 size, Matrix4 cameraMatrix, float3* inputVertex, Matrix4 pose) {
+bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, uint2 size, Matrix4 cameraMatrix, float3* inputVertex) {
 	if (n_warp.size() == 0) {
 		return true;
 	}
@@ -1163,8 +1170,7 @@ bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, ui
 	Eigen::VectorXd b_reg(n_dp * k_n * 3);
 	A_reg.setZero();
 
-	Eigen::Matrix4d rigid_t;
-	matrix4ToEigen(&rigid_t, pose);
+	Eigen::Matrix4d rigid_t = cur_pose;
 	//kfusion transform current frame to canonical form while dfusion in the opposite
 	rigid_t = rigid_t.inverse();
 
@@ -1309,7 +1315,7 @@ bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, ui
 
 	Eigen::CholmodSimplicialLDLT< Eigen::SparseMatrix<double> >solver;
 	solver.compute(w_reg * A_reg.transpose()*A_reg + w_data * A_data.transpose()*A_data);
-
+/*
 	if(solver.info() != Eigen::Success)
 	{
 	    // decomposition failed
@@ -1349,7 +1355,7 @@ bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, ui
 	    n_warp[i].se3 = n_w;
 	    std::cout<<"pose("<<i<<") = "<< n_w << std::endl;
 	}
-
+*/
 	return true;
 }
 
