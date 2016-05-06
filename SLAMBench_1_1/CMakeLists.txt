@@ -10,6 +10,10 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O3  ")
 #set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -O3      -Wall -Wno-unknown-pragmas -Wextra -Werror ")
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O3  -Wall -Wno-unknown-pragmas -Wextra -Werror ")
 
+
+find_package(Cholmod)
+
+include_directories(${CHOLMOD_INCLUDES})
 if(APPLE)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D__APPLE__")
 endif(APPLE)
@@ -36,13 +40,13 @@ endif(OPENNI2_FOUND)
 
   #  ------ BENCHMARK --------
   add_executable(${appname}-benchmark-${version} src/benchmark.cpp src/PowerMonitor.cpp)
-  target_link_libraries(${appname}-benchmark-${version} ${appname}-${version} ${main_common_libraries})
+  target_link_libraries(${appname}-benchmark-${version} ${appname}-${version} ${main_common_libraries}  ${CHOLMOD_LIBRARIES})
   SET_TARGET_PROPERTIES(${appname}-benchmark-${version}
                              PROPERTIES COMPILE_FLAGS "${main_common_compile_flags}")
 
 #  ------ MAIN --------
   if (GLUT_FOUND)
-    add_executable(${appname}-main-${version} src/mainQt.cpp src/PowerMonitor.cpp src/reader.cpp)
+    add_executable(${appname}-main-${version} src/mainQt.cpp src/PowerMonitor.cpp src/reader.cpp )
 
       SET_TARGET_PROPERTIES(${appname}-main-${version}
                              PROPERTIES COMPILE_FLAGS "${main_common_compile_flags}")
@@ -51,7 +55,7 @@ endif(OPENNI2_FOUND)
 if(APPLE)
     target_link_libraries(${appname}-main-${version} ${appname}-${version} ${GLUT_LIBRARIES} ${OPENGL_LIBRARIES}  ${main_common_libraries} )
 else(APPLE)
-    target_link_libraries(${appname}-main-${version} ${appname}-${version} ${GLUT_LIBRARIES} ${OPENGL_LIBRARIES}  ${main_common_libraries} GL )
+    target_link_libraries(${appname}-main-${version} ${appname}-${version} ${GLUT_LIBRARIES} ${OPENGL_LIBRARIES}  ${main_common_libraries} GL  ${CHOLMOD_LIBRARIES})
 endif(APPLE)
   endif(GLUT_FOUND)
   #  ------ QT --------
@@ -89,7 +93,7 @@ if(APPLE)
 			    ${main_common_libraries} ${appname}-${version}  ${GLUT_LIBRARIES} ${OPENGL_LIBRARIES}  )  
 else(APPLE) 
     target_link_libraries(${appname}-qt-${version} Qt5::Core Qt5::Gui Qt5::Widgets Qt5::OpenGL Qt5::PrintSupport 
-			    ${main_common_libraries} ${appname}-${version}  ${GLUT_LIBRARIES} ${OPENGL_LIBRARIES}  GL )  
+			    ${main_common_libraries} ${appname}-${version}  ${GLUT_LIBRARIES} ${OPENGL_LIBRARIES}  GL  ${CHOLMOD_LIBRARIES})  
 endif(APPLE)
     
     

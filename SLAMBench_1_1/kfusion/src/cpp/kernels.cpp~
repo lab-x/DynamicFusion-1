@@ -911,7 +911,7 @@ void raycastKernel(float3* vertex, float3* normal, uint2 inputSize,
 	// std::vector<Eigen::Vector3d> uncovered;
 	// TODO probably need better way to downsample that dgw not constant with eps
 
-    // /*debug df
+    /*debug df
 	for (int i = 0; i < inputSize.x * inputSize.y; i++) {
 		Eigen::Vector3d v_c(vertex[i].x, vertex[i].y, vertex[i].z);
 		int kNear[k_n] = {};
@@ -924,9 +924,7 @@ void raycastKernel(float3* vertex, float3* normal, uint2 inputSize,
 			double dis = (n_warp[kNear[k]].v - v_c).norm() / n_warp[kNear[k]].w;
 			min_dis = dis < min_dis ? dis : min_dis;
 		}
-		std::cout << "min_dis" << min_dis << std::endl;
 		if (min_dis >=1) {
-			std::cout << "adding nd point" << std::endl;
 			n_i dgnew;
 			dgnew.v = v_c;
 			Eigen::Matrix4d wm;
@@ -937,7 +935,7 @@ void raycastKernel(float3* vertex, float3* normal, uint2 inputSize,
 		}
 	}
 
-  // */
+  */
 	TOCK("raycastKernel", inputSize.x * inputSize.y);
 }
 
@@ -1213,7 +1211,6 @@ bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, ui
 
 	Eigen::Matrix4d rigid_t = cur_pose;
 	//kfusion transform current frame to canonical form while dfusion in the opposite
-	std::cout << "non_rigid_track" << std::endl;
 	rigid_t = rigid_t.inverse();
 
 	for (int i = 0; i < n_dp; ++i) {

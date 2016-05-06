@@ -9,7 +9,7 @@ find_package(GLUT   )
 find_package(OpenGL )
 find_package(OpenNI2)
 find_package(Eigen3 REQUIRED)
-find_package(Cholmod)
+#find_package(Cholmod)
 find_package(PkgConfig)
 find_package(Qt5Core)
 find_package(Qt5Widgets)
@@ -31,9 +31,6 @@ endif(APPLE)
 set(common_compile_flags "")
 
 
-message(${CSPARSE_INCLUDE_DIR})
-message(${CSPARSE_LIBRARY})
-
  # ----------------- CPP VERSION ----------------- 
 
 add_library(${appname}-cpp  src/cpp/kernels.cpp)
@@ -52,13 +49,6 @@ add_version(${appname} openmp "-fopenmp" "-fopenmp")
 if(EIGEN3_FOUND)
 include_directories(${EIGEN3_INCLUDE_DIR})
 endif(EIGEN3_FOUND)
-
-#------CHOLMOD Version-----#
-include_directories(${SuiteSparse_INCLUDE_DIRS})
-add_library(${appname}-SuiteSparse  src/cpp/kernels.cpp)
-target_link_libraries(${appname}-SuiteSparse ${common_libraries} ${SuiteSparse_LIBRARIES} )	
-add_version(${appname} SuiteSparse "" "")
-
 
 
 #  ----------------- OCL VERSION ----------------- 
