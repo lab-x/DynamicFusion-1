@@ -12,8 +12,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O3  ")
 
 
 find_package(Cholmod)
-
-include_directories(${CHOLMOD_INCLUDES})
+include_directories(${CHOLMOD_INCLUDE_DIR})
 if(APPLE)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D__APPLE__")
 endif(APPLE)

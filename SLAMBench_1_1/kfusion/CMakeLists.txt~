@@ -50,14 +50,6 @@ if(EIGEN3_FOUND)
 include_directories(${EIGEN3_INCLUDE_DIR})
 endif(EIGEN3_FOUND)
 
-#------CHOLMOD Version-----#
-message(${CHOLMOD_INCLUDE_DIR} ${SuiteSparse_INCLUDE_DIRS})
-
-add_library(${appname}-CHOLMOD  src/cpp/kernels.cpp)
-target_link_libraries(${appname}-CHOLMOD ${common_libraries} ${CHOLMOD_LIBRARIES})	
-add_version(${appname} CHOLMOD "" "")
-
-
 
 #  ----------------- OCL VERSION ----------------- 
  

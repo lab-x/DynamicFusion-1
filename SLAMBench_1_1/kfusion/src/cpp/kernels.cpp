@@ -55,7 +55,7 @@ float3 ** inputVertex;
 float3 ** inputNormal;
 
 /*dynamic fusion*/
-Eigen::Matrix4d cur_pose;
+Matrix4 cur_pose;
 
 struct n_i {
 	Eigen::Vector3d v;
@@ -82,7 +82,7 @@ void so3Matrix(Eigen::Matrix3d* rm, Eigen::Vector3d v);
 
 void matrix4ToEigen(Eigen::Matrix4d* o, Matrix4 i);
 
-void eigenTomatrix4(Matrix4& o, Eigen::Matrix4d i);
+void eigenTomatrix4(Matrix4* o, Eigen::Matrix4d i);
 
 bool print_kernel_timing = false;
 #ifdef __APPLE__
@@ -658,20 +658,20 @@ void findKnearestPointIndex(int* out, std::vector<n_i>& n_warp, Eigen::Vector3d 
 	if (n_size == 0) {
 		return;
 	}
+
+	int checked = 0;
 	for (uint k = 0; k < k_n; ++k) {
-		int min = k;
-		float min_d = (n_warp[min].v - x).norm();
-		for(uint i = k + 1; i < n_size; ++i) {
+		int min = 0;
+		float min_d = std::numeric_limits<float>::max();
+		for(uint i = 0; i < n_size; ++i) {
 			float d = (n_warp[i].v - x).norm();
-			if (d < min_d) {
+			if (d < min_d && (checked >> i) % 2 == 0) {
 				min = i;
 				min_d = d;
 			}
 		}
-		n_i temp = n_warp[min];
-		n_warp[min] = n_warp[k];
-		n_warp[k] = temp;
-		out[k] = k;
+		out[k] = min;
+		checked |= 1 << min;
 	}
 }
 
@@ -914,7 +914,11 @@ void raycastKernel(float3* vertex, float3* normal, uint2 inputSize,
 	// TODO probably need better way to downsample that dgw not constant with eps
 
 	for (int i = 0; i < inputSize.x * inputSize.y; i++) {
+
 		Eigen::Vector3d v_c(vertex[i].x, vertex[i].y, vertex[i].z);
+		if (abs(v_c(2) - 0.0) <= er  && abs(v_c(1) - 0.0) <= er && abs(v_c(0) - 0.0) <= er) {
+			continue;
+		}
 		int kNear[k_n] = {};
 		findKnearestPointIndex(kNear, n_warp, v_c);
 		double min_dis = std::numeric_limits<double>::max();
@@ -934,6 +938,7 @@ void raycastKernel(float3* vertex, float3* normal, uint2 inputSize,
 			dgnew.se3 = wm;
 			dgnew.w = eps;
 			n_warp.push_back(dgnew);
+			std::cout << "added "<< "  " << dgnew.v  << std::endl;
 		}
 	}
 
@@ -950,13 +955,20 @@ bool updatePoseKernel(Matrix4 & pose, const float * output,
 	TooN::SE3<> delta(x);
 	pose = toMatrix4(delta) * pose;
 
-/*
-	Matrix4 del_m4 = toMatrix4(delta);
-	Eigen::Matrix4d del_e;
-	matrix4ToEigen(&del_e, del_m4);
-	cur_pose *= del_e;
+//	Matrix4 del_m4 = inverse(toMatrix4(delta));
+//	Eigen::Matrix4d del_e;
+//	matrix4ToEigen(&del_e, del_m4);
+//	std::cout << "del_m4" << del_m4.data[0].x << del_m4.data[0].y << del_m4.data[0].z << del_m4.data[0].w << std::endl;
+//	std::cout << "del_e" << del_e << std::endl;
+//	cur_pose = del_e * cur_pose;
 
-*/
+	cur_pose = toMatrix4(delta) * cur_pose;
+//	Eigen::Matrix4d del_e;
+//	matrix4ToEigen(&del_e, del_m4);
+//	std::cout << "del_m4" << del_m4.data[0].x << del_m4.data[0].y << del_m4.data[0].z << del_m4.data[0].w << std::endl;
+//	std::cout << "del_e" << del_e << std::endl;
+//	cur_pose = del_e * cur_pose;
+
 	// Return validity test result of the tracking
 	if (norm(x) < icp_threshold)
 		res = true;
@@ -1137,7 +1149,8 @@ bool Kfusion::tracking(float4 k, float icp_threshold, uint tracking_rate,
 
 	oldPose = pose;
 	const Matrix4 projectReference = getCameraMatrix(k) * inverse(raycastPose);
-	cur_pose = Eigen::Matrix4d::Identity();
+
+	eigenTomatrix4(&cur_pose, Eigen::Matrix4d::Identity());
 
 	for (int level = iterations.size() - 1; level >= 0; --level) {
 		uint2 localimagesize = make_uint2(
@@ -1157,6 +1170,16 @@ bool Kfusion::tracking(float4 k, float icp_threshold, uint tracking_rate,
 
 		}
 	}
+//
+//	std::cout << "pose" << pose.data[0].x << pose.data[0].y << pose.data[0].z << pose.data[0].w << std::endl;
+//	std::cout << "pose" << pose.data[1].x << pose.data[1].y << pose.data[1].z << pose.data[1].w << std::endl;
+//	std::cout << "pose" << pose.data[2].x << pose.data[2].y << pose.data[2].z << pose.data[2].w << std::endl;
+//	std::cout << "pose" << pose.data[3].x << pose.data[3].y << pose.data[3].z << pose.data[3].w << std::endl;
+//
+//	std::cout << "cur_pose * oldPose" << (cur_pose * oldPose).data[0].x << (cur_pose * oldPose).data[0].y << (cur_pose * oldPose).data[0].z << (cur_pose * oldPose).data[0].w << std::endl;
+//	std::cout << "cur_pose * oldPose" << (cur_pose * oldPose).data[1].x << (cur_pose * oldPose).data[1].y << (cur_pose * oldPose).data[1].z << (cur_pose * oldPose).data[1].w << std::endl;
+//	std::cout << "cur_pose * oldPose" << (cur_pose * oldPose).data[2].x << (cur_pose * oldPose).data[2].y << (cur_pose * oldPose).data[2].z << (cur_pose * oldPose).data[2].w << std::endl;
+//	std::cout << "cur_pose * oldPose" << (cur_pose * oldPose).data[3].x << (cur_pose * oldPose).data[3].y << (cur_pose * oldPose).data[3].z << (cur_pose * oldPose).data[3].w << std::endl;
 
 	bool rigid_return = checkPoseKernel(pose, oldPose, reductionoutput, computationSize,
 			track_threshold);
@@ -1216,10 +1239,34 @@ bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, ui
 	Eigen::VectorXd b_reg(n_dp * k_n * 3);
 	A_reg.setZero();
 
-	Eigen::Matrix4d rigid_t = cur_pose.inverse();
+	Eigen::Matrix4d cur_pose_eg;
+	matrix4ToEigen(&cur_pose_eg, cur_pose);
+	Eigen::Matrix4d rigid_t;
+	Eigen::Matrix4d inv_t;
+	Eigen::Matrix4d inv_r = Eigen::Matrix4d::Identity();
+
+	inv_t << 1, 0, 0, -cur_pose.data[0].w,
+			 0, 1, 0, -cur_pose.data[1].w,
+			 0, 0, 1, -cur_pose.data[2].w,
+			 0, 0, 0, 1;
+
+	std::cout << "inv_t" << inv_t << std::endl;
+	inv_r.block(0,0,3,3) = cur_pose_eg.block(0,0,3,3);
+	std::cout << "inv_r" << inv_r << std::endl;
+	Matrix4 inv_r_m4;
+	eigenTomatrix4(&inv_r_m4, inv_r);
+	Eigen::Matrix4d temp;
+	matrix4ToEigen(&temp, inverse(inv_r_m4));
+
+	inv_r.block(0,0,3,3) = temp.block(0,0,3,3);
+	std::cout << "cur_pose_eg.block(0,0,3,3)" << cur_pose_eg.block(0,0,3,3) << std::endl;
+	std::cout << "inv_r" << inv_r << std::endl;
+	rigid_t = inv_r * inv_t;
+
 	std::cout << "rigid_t" << rigid_t << std::endl;
 	for (int i = 0; i < n_dp; ++i) {
 		int kNear[k_n] = {};
+		//TODO not include it self
 		findKnearestPointIndex(kNear, n_warp, n_warp[i].v);
 		for (int k = 0; k < k_n; k++) {
 
@@ -1227,41 +1274,43 @@ bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, ui
 			double alpha = n_warp[j].w > n_warp[i].w ? n_warp[j].w : n_warp[i].w;
 			double con_a = pow(alpha, 0.5);
 
-			Eigen::Vector3d ridgv =  rigid_t.block(0,0,3,3) * n_warp[j].v;
+			Eigen::Vector3d ridgv =  rigid_t.block(0,0,3,3) * n_warp[i].v;
 
-			A_reg.coeffRef((i * k_n + k)*3, i*3) = 0;
-			A_reg.coeffRef((i * k_n + k)*3 + 1, i*3) = -con_a * ridgv[2];
-			A_reg.coeffRef((i * k_n + k)*3 + 2, i*3) = con_a * ridgv[1];
+			//std::cout << "rigid_t.block(0,0,3,3) " << k << "  " << rigid_t.block(0,0,3,3)  << std::endl;
 
-			A_reg.coeffRef((i * k_n + k)*3, i*3 + 1) = con_a * ridgv[2];
-			A_reg.coeffRef((i * k_n + k)*3 + 1, i*3 + 1) = 0;
-			A_reg.coeffRef((i * k_n + k)*3 + 2, i*3 + 1) = -con_a * ridgv[0];
+			A_reg.coeffRef((i * k_n + k)*3, i * 6) = 0;
+			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6) = -con_a * ridgv[2];
+			A_reg.coeffRef((i * k_n + k)*3 + 2, i * 6) = con_a * ridgv[1];
 
-			A_reg.coeffRef((i * k_n + k)*3, i*3 + 2) = -con_a * ridgv[1];
-			A_reg.coeffRef((i * k_n + k)*3 + 1, i*3 + 2) = con_a * ridgv[0];
-			A_reg.coeffRef((i * k_n + k)*3 + 2, i*3 + 2) = 0;
+			A_reg.coeffRef((i * k_n + k)*3, i * 6 + 1) = con_a * ridgv[2];
+			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6 + 1) = 0;
+			A_reg.coeffRef((i * k_n + k)*3 + 2, i * 6 + 1) = -con_a * ridgv[0];
 
-			A_reg.coeffRef((i * k_n + k)*3, (i+1)*3) = con_a;
-			A_reg.coeffRef((i * k_n + k)*3 + 1, (i+1)*3 + 1) = con_a;
-			A_reg.coeffRef((i * k_n + k)*3 + 2, (i+1)*3 + 2) = con_a;
+			A_reg.coeffRef((i * k_n + k)*3, i * 6 + 2) = -con_a * ridgv[1];
+			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6 + 2) = con_a * ridgv[0];
+			A_reg.coeffRef((i * k_n + k)*3 + 2, i*6 + 2) = 0;
+
+			A_reg.coeffRef((i * k_n + k)*3, i * 6 + 3) = con_a;
+			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6 + 4) = con_a;
+			A_reg.coeffRef((i * k_n + k)*3 + 2, i * 6 + 5) = con_a;
 
 			Eigen::Vector3d rjdgv =  rigid_t.block(0,0,3,3) * n_warp[j].v;
 
-			A_reg.coeffRef((i * k_n + k)*3, j*3) = 0;
-			A_reg.coeffRef((i * k_n + k)*3 + 1, j*3) = con_a * rjdgv[2];
-			A_reg.coeffRef((i * k_n + k)*3 + 2, j*3) = -con_a * rjdgv[1];
+			A_reg.coeffRef((i * k_n + k)*3, j * 6) = 0;
+			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6) = con_a * rjdgv[2];
+			A_reg.coeffRef((i * k_n + k)*3 + 2, j * 6) = -con_a * rjdgv[1];
 
-			A_reg.coeffRef((i * k_n + k)*3, j*3 + 1) = -con_a * rjdgv[2];
-			A_reg.coeffRef((i * k_n + k)*3 + 1, j*3 + 1) = 0;
-			A_reg.coeffRef((i * k_n + k)*3 + 2, j*3 + 1) = con_a * rjdgv[0];
+			A_reg.coeffRef((i * k_n + k)*3, j * 6 + 1) = -con_a * rjdgv[2];
+			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6 + 1) = 0;
+			A_reg.coeffRef((i * k_n + k)*3 + 2, j*6 + 1) = con_a * rjdgv[0];
 
-			A_reg.coeffRef((i * k_n + k)*3, j*3 + 2) = con_a * rjdgv[1];
-			A_reg.coeffRef((i * k_n + k)*3 + 1, j*3 + 2) = -con_a * rjdgv[0];
-			A_reg.coeffRef((i * k_n + k)*3 + 2, j*3 + 2) = 0;
+			A_reg.coeffRef((i * k_n + k)*3, j * 6 + 2) = con_a * rjdgv[1];
+			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6 + 2) = -con_a * rjdgv[0];
+			A_reg.coeffRef((i * k_n + k)*3 + 2, j * 6 + 2) = 0;
 
-			A_reg.coeffRef((i * k_n + k)*3, (j+1)*3) = -con_a;
-			A_reg.coeffRef((i * k_n + k)*3 + 1, (j+1)*3 + 1) = -con_a;
-			A_reg.coeffRef((i * k_n + k)*3 + 2, (j+1)*3 + 2) = -con_a;
+			A_reg.coeffRef((i * k_n + k)*3, j * 6 + 3) = -con_a;
+			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6 + 4) = -con_a;
+			A_reg.coeffRef((i * k_n + k)*3 + 2, j * 6 + 5) = -con_a;
 
 			Eigen::Vector3d ti =  rigid_t.block(0,3,3,1);
 			Eigen::Vector3d tj =  rigid_t.block(0,3,3,1);
@@ -1272,6 +1321,7 @@ bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, ui
 			b_reg((i * k_n + k)*3 + 2) = t[2];
 		}
 	}
+
 	// Data term
 	Eigen::SparseMatrix<double> A_data(size.x * size.y, n_dp * 6);
 	Eigen::VectorXd b_data(size.x * size.y);
@@ -1341,13 +1391,13 @@ bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, ui
 				Eigen::RowVector3d c_t = d_p.w / eta * C_n.transpose();
 
 				int j = kNear[k];
-				A_data.coeffRef(pixelx + pixely * size.x, j*3) = c_r[0];
-				A_data.coeffRef(pixelx + pixely * size.x, j*3 + 1) = c_r[1];
-				A_data.coeffRef(pixelx + pixely * size.x, j*3 + 2) = c_r[2];
+				A_data.coeffRef(pixelx + pixely * size.x, j * 6) = c_r[0];
+				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 1) = c_r[1];
+				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 2) = c_r[2];
 
-				A_data.coeffRef(pixelx + pixely * size.x, (j + 1)*3) = c_t[0];
-				A_data.coeffRef(pixelx + pixely * size.x, (j + 1)*3 + 1) = c_t[1];
-				A_data.coeffRef(pixelx + pixely * size.x, (j + 1)*3 + 2) = c_t[2];
+				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 3) = c_t[0];
+				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 4) = c_t[1];
+				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 5) = c_t[2];
 			}
 
 			b_data(pixelx + pixely * size.x) = C_n.transpose() * D_v;
@@ -1356,6 +1406,15 @@ bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, ui
 	}
 	float w_data = 1;
 	float w_reg = 200;
+
+	std::cout << "n_dp" << n_dp << std::endl;
+
+//	std::cout << "A_reg" << A_reg << std::endl;
+//	std::cout << "A_data" << A_data << std::endl;
+//	std::cout << " A_reg" <<  A_reg << std::endl;
+//	std::cout << " A_reg.transpose()*A_reg" <<  A_reg.transpose()*A_reg << std::endl;
+//	std::cout << "A_data.transpose()*A_data" << A_data.transpose()*A_data << std::endl;
+//	std::cout << "w_reg * A_reg.transpose()*A_reg + w_data * A_data.transpose()*A_data" << w_reg * A_reg.transpose()*A_reg + w_data * A_data.transpose()*A_data << std::endl;
 
 	Eigen::CholmodSimplicialLDLT< Eigen::SparseMatrix<double> >solver;
 	solver.compute(w_reg * A_reg.transpose()*A_reg + w_data * A_data.transpose()*A_data);
@@ -1366,6 +1425,7 @@ bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, ui
 	    std::cout<<"Decomposition failed" << std::endl;
 	    return false;
 	}
+
 	std::cout << "solved" << std::endl;
 	Eigen::VectorXd x_update;
 	Eigen::VectorXd Axb = -1.0f*(w_reg * A_reg.transpose()*b_reg + w_data * A_data.transpose()*b_data);
