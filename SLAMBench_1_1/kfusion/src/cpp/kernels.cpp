@@ -28,9 +28,9 @@
 		std::cerr  << (( tock_clockData.tv_nsec - tick_clockData.tv_nsec) + ((tock_clockData.tv_nsec<tick_clockData.tv_nsec)?1000000000:0)) << " " <<  size << std::endl;}}
 #else
 
-	#define TICK() {if (print_kernel_timing) {clock_gettime(CLOCK_MONOTONIC, &tick_clockData);}}
+	#define TICK()    {if (print_kernel_timing) {clock_gettime(CLOCK_MONOTONIC, &tick_clockData);}}
 
-	#define TOCK(str,size) {if (print_kernel_timing) {clock_gettime(CLOCK_MONOTONIC, &tock_clockData); std::cerr<< str << " ";\
+	#define TOCK(str,size)  {if (print_kernel_timing) {clock_gettime(CLOCK_MONOTONIC, &tock_clockData); std::cerr<< str << " ";\
 		if((tock_clockData.tv_sec > tick_clockData.tv_sec) && (tock_clockData.tv_nsec >= tick_clockData.tv_nsec))   std::cerr<< tock_clockData.tv_sec - tick_clockData.tv_sec << std::setfill('0') << std::setw(9);\
 		std::cerr  << (( tock_clockData.tv_nsec - tick_clockData.tv_nsec) + ((tock_clockData.tv_nsec<tick_clockData.tv_nsec)?1000000000:0)) << " " <<  size << std::endl;}}
 
@@ -54,7 +54,7 @@ Matrix4 raycastPose;
 float3 ** inputVertex;
 float3 ** inputNormal;
 
-/*dynamic fusion*/
+// dynamic fusion
 Matrix4 cur_pose;
 
 struct n_i {
@@ -65,24 +65,14 @@ struct n_i {
 
 std::vector<n_i> n_warp;
 
-struct n_reg {
-	n_i ** data;
-	int ** edges;
-	int level;
-};
-
-void findKnearestPointIndex(int* out, std::vector<n_i>& n_warp, Eigen::Vector3d x);
-
+void findKnearestPointIndex(int* out, std::vector<n_i>& n_warp, Eigen::Vector3d x, int index);
 void getWarpMatrix(Eigen::Matrix4d* out, Eigen::Vector3d x);
-
 bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, uint2 size,
 		Matrix4 cameraMatrix, float3* inputVertex);
-
-void so3Matrix(Eigen::Matrix3d* rm, Eigen::Vector3d v);
-
 void matrix4ToEigen(Eigen::Matrix4d* o, Matrix4 i);
-
-void eigenTomatrix4(Matrix4* o, Eigen::Matrix4d i);
+void eigenTomatrix4(Matrix4& o, Eigen::Matrix4d i);
+void so3Matrix(Eigen::Matrix3d* rm, Eigen::Vector3d v);
+void so3Matrix(Eigen::Matrix3d* rm, Eigen::Vector3d v);
 
 bool print_kernel_timing = false;
 #ifdef __APPLE__
@@ -93,6 +83,348 @@ bool print_kernel_timing = false;
 	struct timespec tick_clockData;
 	struct timespec tock_clockData;
 #endif
+
+// dynamic fusion
+void eigenTomatrix4(Matrix4& o, Eigen::Matrix4d i) {
+	for (int k = 0; k < 4; k++) {
+		o.data[k].x = i(k, 0);
+		o.data[k].y = i(k, 1);
+		o.data[k].z = i(k, 2);
+		o.data[k].w = i(k, 3);
+	}
+}
+
+// dynamic fusion
+void findKnearestPointIndex(int* out, std::vector<n_i>& n_warp, Eigen::Vector3d x, int index) {
+	int n_size = n_warp.size();
+	int checked = 0;
+	for (uint k = 0; k < k_n; ++k) {
+		if (k >= n_size) {
+			out[k] = -1;
+			continue;
+		}
+		int min = 0;
+		float min_d = std::numeric_limits<float>::max();
+
+		for(uint i = 0; i < n_size; ++i) {
+			if (index == i) {
+				continue;
+			}
+			float d = (n_warp[i].v - x).norm();
+			if (d < min_d && (checked >> i) % 2 == 0) {
+				min = i;
+				min_d = d;
+			}
+		}
+		out[k] = min;
+		checked |= 1 << min;
+	}
+}
+
+// dynamic fusion
+void getWarpMatrix(Eigen::Matrix4d* out, Eigen::Vector3d x) {
+	if (n_warp.size() == 0) {
+		*out = Eigen::Matrix4d::Identity();
+		return;
+	}
+
+	//Eigen::VectorXd bq;
+	Eigen::Matrix4d bm = Eigen::Matrix4d::Zero();
+	// Get k nearest points
+	int kNear[k_n] = {};
+	findKnearestPointIndex(kNear, n_warp, x, -1);
+	// blend them
+	double weight_sum;
+	for (uint k = 0; k < k_n; ++k) {
+      /*
+		// For BDQ
+		Eigen::Quaternion qr(n_warp[k].se3.block(0,0,3,3));
+		Eigen::Vector4d t;
+		t << 1 << n_warp[k].v ;
+		Eigen::Quaternion qt(t);
+		Eigen::VectorXd dq;
+		dq << qr << 0.5*qt * qr;
+		bq += n_warp[k].w * dq;
+	}
+	bq /= bq.norm();
+	Eigen::Quaternion qr(bq.head(4));
+	Eigen::Matrix3d r = qr.matrix();
+	bq.tail(4)
+	*/
+		if (kNear[k] < 0) {
+			break;
+		}
+		bm += n_warp[kNear[k]].w * n_warp[kNear[k]].se3;
+		weight_sum += n_warp[kNear[k]].w;
+	}
+	*out = bm/weight_sum;
+}
+
+//dynamic fusion
+bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, uint2 size, Matrix4 cameraMatrix, float3* inputVertex) {
+	if (n_warp.size() == 0) {
+		return true;
+	}
+
+	// Reg term
+	int n_dp = n_warp.size();
+
+	//reset n_warp
+	for(int i = 0; i < n_dp; i++) {
+		Eigen::Matrix4d temp;
+		temp << 1,0,0,0,
+				0,1,0,0,
+				0,0,1,0,
+				0,0,0,1;
+		n_warp[i].se3 = temp;
+	}
+
+	Eigen::SparseMatrix<double> A_reg(n_dp * k_n * 3, n_dp * 6);
+	Eigen::VectorXd b_reg(n_dp * k_n * 3);
+	A_reg.setZero();
+
+	Eigen::Matrix4d rigid_t;
+	Matrix4 inv_cur = inverse(cur_pose);
+	matrix4ToEigen(&rigid_t, inv_cur);
+
+	std::cout << "rigid_t" << rigid_t << std::endl;
+	for (int i = 0; i < n_dp; ++i) {
+		int kNear[k_n] = {};
+		findKnearestPointIndex(kNear, n_warp, n_warp[i].v, i);
+		for (int k = 0; k < k_n; k++) {
+			if (kNear[k] < 0) {
+				return false;
+			}
+			int j = kNear[k];
+			double alpha = n_warp[j].w > n_warp[i].w ? n_warp[j].w : n_warp[i].w;
+			double con_a = pow(alpha, 0.5);
+
+			Eigen::Vector3d ridgv =  rigid_t.block(0,0,3,3) * n_warp[i].v;
+
+			//std::cout << "rigid_t.block(0,0,3,3) " << k << "  " << rigid_t.block(0,0,3,3)  << std::endl;
+
+			A_reg.coeffRef((i * k_n + k)*3, i * 6) = 0;
+			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6) = -con_a * ridgv[2];
+			A_reg.coeffRef((i * k_n + k)*3 + 2, i * 6) = con_a * ridgv[1];
+
+			A_reg.coeffRef((i * k_n + k)*3, i * 6 + 1) = con_a * ridgv[2];
+			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6 + 1) = 0;
+			A_reg.coeffRef((i * k_n + k)*3 + 2, i * 6 + 1) = -con_a * ridgv[0];
+
+			A_reg.coeffRef((i * k_n + k)*3, i * 6 + 2) = -con_a * ridgv[1];
+			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6 + 2) = con_a * ridgv[0];
+			A_reg.coeffRef((i * k_n + k)*3 + 2, i*6 + 2) = 0;
+
+			A_reg.coeffRef((i * k_n + k)*3, i * 6 + 3) = con_a;
+			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6 + 4) = con_a;
+			A_reg.coeffRef((i * k_n + k)*3 + 2, i * 6 + 5) = con_a;
+
+			Eigen::Vector3d rjdgv =  rigid_t.block(0,0,3,3) * n_warp[j].v;
+
+			A_reg.coeffRef((i * k_n + k)*3, j * 6) = 0;
+			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6) = con_a * rjdgv[2];
+			A_reg.coeffRef((i * k_n + k)*3 + 2, j * 6) = -con_a * rjdgv[1];
+
+			A_reg.coeffRef((i * k_n + k)*3, j * 6 + 1) = -con_a * rjdgv[2];
+			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6 + 1) = 0;
+			A_reg.coeffRef((i * k_n + k)*3 + 2, j*6 + 1) = con_a * rjdgv[0];
+
+			A_reg.coeffRef((i * k_n + k)*3, j * 6 + 2) = con_a * rjdgv[1];
+			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6 + 2) = -con_a * rjdgv[0];
+			A_reg.coeffRef((i * k_n + k)*3 + 2, j * 6 + 2) = 0;
+
+			A_reg.coeffRef((i * k_n + k)*3, j * 6 + 3) = -con_a;
+			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6 + 4) = -con_a;
+			A_reg.coeffRef((i * k_n + k)*3 + 2, j * 6 + 5) = -con_a;
+
+			Eigen::Vector3d ti =  rigid_t.block(0,3,3,1);
+			Eigen::Vector3d tj =  rigid_t.block(0,3,3,1);
+			Eigen::Vector3d t =  con_a * (ridgv - rjdgv + ti - tj);
+
+			b_reg((i * k_n + k)*3) = t[0];
+			b_reg((i * k_n + k)*3 + 1) = t[1];
+			b_reg((i * k_n + k)*3 + 2) = t[2];
+		}
+	}
+
+	// Data term
+	Eigen::SparseMatrix<double> A_data(size.x * size.y, n_dp * 6);
+	std::cout << "size" << size.x * size.y << std::endl;
+	Eigen::VectorXd b_data(size.x * size.y);
+	A_data.setZero();
+	int pixelx, pixely;
+	for (pixely = 0; pixely < size.y; pixely++) {
+		for (pixelx = 0; pixelx < size.x; pixelx++) {
+
+			float3 f3v_u = vertex[pixelx + pixely * size.x];
+			Eigen::Vector3d v_u(f3v_u.x, f3v_u.y, f3v_u.z);
+			float3 f3n_u = normal[pixelx + pixely * size.x];
+			Eigen::Vector3d n_u(f3n_u.x, f3n_u.y, f3n_u.z);
+
+			Eigen::Matrix4d w;
+			getWarpMatrix(&w, v_u);
+			Eigen::Matrix4d eigenCameraMatrix;
+			matrix4ToEigen(&eigenCameraMatrix, cameraMatrix);
+
+			Eigen::Vector3d v_hat_u = rigid_t.block(0,0,3,3) * v_u + rigid_t.block(0,3,3,1);
+			Eigen::Vector3d projected_u_hat = eigenCameraMatrix.block(0,0,3,3) * v_hat_u + eigenCameraMatrix.block(0,3,3,1);
+			//Eigen::Vector3d projected_u_hat = eigenCameraMatrix.block(0,0,3,3) * (w.block(0,0,3,3) * v_u + w.block(0,3,3,1))
+			//		+ eigenCameraMatrix.block(0,3,3,1);
+			Eigen::Vector2i pixel_u;
+
+			pixel_u << int(projected_u_hat[0] / projected_u_hat[2] + 0.5),
+					int(projected_u_hat[1] / projected_u_hat[2] + 0.5);
+			if (pixel_u[0] < 0 || pixel_u[0] > size.x - 1
+					|| pixel_u[1] < 0 || pixel_u[1] > size.y - 1) {
+				continue;
+			}
+
+			int kNear[k_n] = {};
+			findKnearestPointIndex(kNear, n_warp, v_u, -1);
+
+			Eigen::Vector3d C_n(0, 0, 0);
+			Eigen::Vector3d C_v(0, 0, 0);
+			double eta = 0;
+
+			for (int k = 0; k < k_n; k++) {
+				n_i d_p = n_warp[kNear[k]];
+				C_n += d_p.w * rigid_t.block(0,0,3,3) * n_u;
+				C_v += d_p.w * (rigid_t.block(0,0,3,3) * v_u + rigid_t.block(0,3,3,1));
+
+				eta += d_p.w;
+			}
+			C_n /= eta;
+			C_v /= eta;
+
+			float3 vlf3 = inputVertex[pixel_u[0] + pixel_u[1] * size.x];
+			Eigen::Vector3d vl(vlf3.x, vlf3.y, vlf3.z);
+			Eigen::Vector3d D_v = C_v - vl;
+
+			for (int k = 0; k < k_n; k++) {
+				n_i d_p = n_warp[kNear[k]];
+
+				Eigen::Vector3d rn = rigid_t.block(0,0,3,3) * n_u;
+				Eigen::Matrix3d rnm;
+				so3Matrix(&rnm, rn);
+
+				Eigen::Vector3d rv = rigid_t.block(0,0,3,3) * v_u;
+				Eigen::Matrix3d rvm;
+				so3Matrix(&rvm, rv);
+
+				Eigen::RowVector3d c_r = d_p.w * (D_v.transpose() * -rnm +
+						C_n.transpose() * rvm) / eta;
+
+				Eigen::RowVector3d c_t = d_p.w / eta * C_n.transpose();
+
+				int j = kNear[k];
+				A_data.coeffRef(pixelx + pixely * size.x, j * 6) = c_r[0];
+				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 1) = c_r[1];
+				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 2) = c_r[2];
+
+				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 3) = c_t[0];
+				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 4) = c_t[1];
+				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 5) = c_t[2];
+			}
+
+			b_data(pixelx + pixely * size.x) = C_n.transpose() * D_v;
+
+		}
+	}
+	float w_data = 1;
+	float w_reg = 200;
+
+
+
+//	std::cout << "A_reg" << A_reg << std::endl;
+//	std::cout << "A_data" << A_data << std::endl;
+//	std::cout << " A_reg" <<  A_reg << std::endl;
+//	std::cout << " A_reg.transpose()*A_reg" <<  A_reg.transpose()*A_reg << std::endl;
+//	std::cout << "A_data.transpose()*A_data" << A_data.transpose()*A_data << std::endl;
+//	std::cout << "w_reg * A_reg.transpose()*A_reg + w_data * A_data.transpose()*A_data" << w_reg * A_reg.transpose()*A_reg + w_data * A_data.transpose()*A_data << std::endl;
+	Eigen::CholmodSimplicialLDLT< Eigen::SparseMatrix<double> >solver2;
+	solver2.compute(w_data * A_data.transpose()*A_data);
+
+	if(solver2.info() != Eigen::Success)
+	{
+	    // decomposition failed
+	    std::cout<<"data Decomposition failed" << std::endl;
+	    std::cout<<"fail info" << solver2.info() << std::endl;
+	}
+
+	Eigen::CholmodSimplicialLDLT< Eigen::SparseMatrix<double> >solver1;
+	solver1.compute(w_reg * A_reg.transpose()*A_reg);
+
+	if(solver1.info() != Eigen::Success)
+	{
+	    // decomposition failed
+	    std::cout<<"reg Decomposition failed" << std::endl;
+	    std::cout<<"fail info" << solver1.info() << std::endl;
+	}
+
+	Eigen::CholmodSimplicialLDLT< Eigen::SparseMatrix<double> >solver;
+	solver.compute(w_reg * A_reg.transpose()*A_reg + w_data * A_data.transpose()*A_data);
+
+	if(solver.info() != Eigen::Success)
+	{
+	    // decomposition failed
+	    std::cout<<"Decomposition failed" << std::endl;
+	    return false;
+	}
+
+	std::cout << "solved" << std::endl;
+	Eigen::VectorXd x_update;
+	Eigen::VectorXd Axb = -1.0f * (w_reg * A_reg.transpose() * b_reg + w_data * A_data.transpose() * b_data);
+	x_update = solver.solve(Axb);
+
+	std::cout<<"norm of x_update = " << x_update.norm() << std::endl;
+	//TODO Set a timer here
+	//std::cout<<"solver time elapsed = " << solver_timer.elapsed() << std::endl;
+
+	// Updates
+	for(int i = 0 ; i < n_dp;i++)
+	{
+	    // Get the rotation update
+	    Eigen::Vector3d so3_i(x_update(6*i+0), x_update(6*i+1), x_update(6*i+2));
+
+	    // Get the translation update
+	    Eigen::Vector3d t_i(x_update(6*i+3), x_update(6*i+4), x_update(6*i+5));
+
+	    Eigen::Matrix3d r_i;
+  	    so3Matrix(&r_i, so3_i);
+
+	    Eigen::Matrix3d o_r = n_warp[i].se3.block(0,0,3,3);
+	    Eigen::Vector3d o_t = n_warp[i].se3.block(0,3,3,1);
+
+	    Eigen::Matrix3d n_r = r_i * o_r;
+	    Eigen::Vector3d n_t = o_t + t_i;
+
+	    Eigen::Matrix4d n_w;
+	    n_w << n_r, n_t,
+	    	   0,0,0,1;
+	    n_warp[i].se3 = n_w;
+	    std::cout<<"pose("<<i<<") = "<< n_w << std::endl;
+	}
+	return true;
+}
+
+void so3Matrix(Eigen::Matrix3d* rm, Eigen::Vector3d v) {
+	*rm << 0, -v[2], v[1],
+	v[2], 0, -v[0],
+	-v[1], v[0], 0;
+}
+
+void matrix4ToEigen(Eigen::Matrix4d* o, Matrix4 i) {
+
+	float4 row0 = i.data[0];
+	float4 row1 = i.data[1];
+	float4 row2 = i.data[2];
+	float4 row3 = i.data[3];
+	*o << row0.x, row0.y, row0.z, row0.w,
+		  row1.x, row1.y, row1.z, row1.w,
+		  row2.x, row2.y, row2.z, row2.w,
+		  row3.x, row3.y, row3.z, row3.w;
+
+}
 
 void Kfusion::languageSpecificConstructor() {
 
@@ -132,7 +464,7 @@ void Kfusion::languageSpecificConstructor() {
 	gaussian = (float*) calloc(gaussianS * sizeof(float), 1);
 	int x;
 	for (unsigned int i = 0; i < gaussianS; i++) {
-		x = i - radius;
+		x = i - 2;
 		gaussian[i] = expf(-(x * x) / (2 * delta * delta));
 	}
 	// ********* END : Generate the gaussian *************
@@ -652,69 +984,6 @@ void halfSampleRobustImageKernel(float* out, const float* in, uint2 inSize,
 	TOCK("halfSampleRobustImageKernel", outSize.x * outSize.y);
 }
 
-/*dynamic fusion*/
-void findKnearestPointIndex(int* out, std::vector<n_i>& n_warp, Eigen::Vector3d x) {
-	int n_size = n_warp.size();
-	if (n_size == 0) {
-		return;
-	}
-
-	int checked = 0;
-	for (uint k = 0; k < k_n; ++k) {
-		int min = 0;
-		float min_d = std::numeric_limits<float>::max();
-		for(uint i = 0; i < n_size; ++i) {
-			float d = (n_warp[i].v - x).norm();
-			if (d < min_d && (checked >> i) % 2 == 0) {
-				min = i;
-				min_d = d;
-			}
-		}
-		out[k] = min;
-		checked |= 1 << min;
-	}
-}
-
-/*dynamic fusion*/
-void getWarpMatrix(Eigen::Matrix4d* out, Eigen::Vector3d x) {
-	if (n_warp.size() == 0) {
-		*out << 1,0,0,0,
-			   0,1,0,0,
-			   0,0,1,0,
-			   0,0,0,1;
-		return;
-	}
-
-
-	//Eigen::VectorXd bq;
-	Eigen::Matrix4d bm = Eigen::Matrix4d::Zero();
-	// Get k nearest points
-	int kNear[k_n] = {};
-	findKnearestPointIndex(kNear, n_warp, x);
-	// blend them
-	double weight_sum;
-	for (uint k = 0; k < k_n; ++k) {
-
-		/* For BDQ
-		Eigen::Quaternion qr(n_warp[k].se3.block(0,0,3,3));
-		Eigen::Vector4d t;
-		t << 1 << n_warp[k].v ;
-		Eigen::Quaternion qt(t);
-		Eigen::VectorXd dq;
-		dq << qr << 0.5*qt * qr;
-		bq += n_warp[k].w * dq;
-	}
-	bq /= bq.norm();
-	Eigen::Quaternion qr(bq.head(4));
-	Eigen::Matrix3d r = qr.matrix();
-	bq.tail(4) */
-
-		bm += n_warp[kNear[k]].w * n_warp[kNear[k]].se3;
-		weight_sum += n_warp[kNear[k]].w;
-	}
-	*out = bm/weight_sum;
-}
-
 void integrateKernel(Volume vol, const float* depth, uint2 depthSize,
 		const Matrix4 invTrack, const Matrix4 K, const float mu,
 		const float maxweight) {
@@ -760,76 +1029,10 @@ void integrateKernel(Volume vol, const float* depth, uint2 depthSize,
 			}
 		}
 	TOCK("integrateKernel", vol.size.x * vol.size.y);
-/* debug df
-	for (y = 0; y < vol.size.y; y++)
-		for (unsigned int x = 0; x < vol.size.x; x++) {
-
-			uint3 pix = make_uint3(x, y, 0); //pix.x = x;pix.y = y;
-
-			for (pix.z = 0; pix.z < vol.size.z;
-					//++pix.z, pos += delta, cameraX += cameraDelta) {
-					++pix.z) {
-
-				Eigen::Vector3d e_x(vol.pos(pix).x, vol.pos(pix).y, vol.pos(pix).z);
-				Eigen::Matrix4d defT;
-				getWarpMatrix(&defT, e_x);
-
-				Eigen::Vector3d e_xt = defT.block(0,0,3,3) * e_x + defT.block(0,3,3,1);
-				float pos_1 = e_xt(0);
-				float pos_2 = e_xt(1);
-				float pos_3 = e_xt(2);
-				float3 pos = invTrack * make_float3(pos_1, pos_2, pos_3);
-				float3 cameraX = K * pos;
-
-				if (pos.z < 0.0001f) // some near plane constraint
-									continue;
-
-				const float2 pixel = make_float2(cameraX.x / cameraX.z + 0.5f,
-						cameraX.y / cameraX.z + 0.5f);
-				if (pixel.x < 0 || pixel.x > depthSize.x - 1 || pixel.y < 0
-						|| pixel.y > depthSize.y - 1)
-					continue;
-				const uint2 px = make_uint2(pixel.x, pixel.y);
-				if (depth[px.x + px.y * depthSize.x] == 0)
-					continue;
-				const float diff =
-						(depth[px.x + px.y * depthSize.x] - cameraX.z)
-								* std::sqrt(
-										1 + sq(pos.x / pos.z)
-												+ sq(pos.y / pos.z));
-				if (diff > -mu) {
-					const float sdf = fminf(mu, diff);
-					float2 data = vol[pix];
-					// TODO 1 should be weight w(x) 3.2-6
-					data.x = clamp((data.y * data.x + sdf * sdf) / (data.y + 1), -1.f,
-							1.f);
-					// TODO 1 should be weight w(x) 3.2-6
-					data.y = fminf(data.y + 1, maxweight);
-					vol.set(pix, data);
-				}
-			}
-		}
-	TOCK("integrateKernel", vol.size.x * vol.size.y); */
 }
 float4 raycast(const Volume volume, const uint2 pos, const Matrix4 view,
 		const float nearPlane, const float farPlane, const float step,
 		const float largestep) {
-
-	// Volume: canonical?
-	// TODO need to convert volume
-	/*
-			uint3 pix = make_uint3(x, y, 0); //pix.x = x;pix.y = y;
-			Eigen::Vector3d e_x(integration.pos(pix).x, integration.pos(pix).y, integration.pos(pix).z);
-			Eigen::Matrix4d defT;
-			getWarpMatrix(&defT, e_x);
-
-			Eigen::Matrix4d eigenRigid;
-			matrix4ToEigen(&eigenRigid, m4view);
-			Eigen::Matrix4d eigenView = defT * eigenRigid;
-
-			Matrix4 view;
-			eigenTomatrix4(&view, eigenView);
-	 */
 
 	const float3 origin = get_translation(view);
 	const float3 direction = rotate(view, make_float3(pos.x, pos.y, 1.f));
@@ -894,6 +1097,7 @@ void raycastKernel(float3* vertex, float3* normal, uint2 inputSize,
 			const float4 hit = raycast(integration, pos, view, nearPlane,
 					farPlane, step, largestep);
 			if (hit.w > 0.0) {
+				// TODO use getWarp to update shape here
 				vertex[pos.x + pos.y * inputSize.x] = make_float3(hit);
 				float3 surfNorm = integration.grad(make_float3(hit));
 				if (length(surfNorm) == 0) {
@@ -910,9 +1114,6 @@ void raycastKernel(float3* vertex, float3* normal, uint2 inputSize,
 			}
 		}
 
-	// std::vector<Eigen::Vector3d> uncovered;
-	// TODO probably need better way to downsample that dgw not constant with eps
-
 	for (int i = 0; i < inputSize.x * inputSize.y; i++) {
 
 		Eigen::Vector3d v_c(vertex[i].x, vertex[i].y, vertex[i].z);
@@ -920,11 +1121,11 @@ void raycastKernel(float3* vertex, float3* normal, uint2 inputSize,
 			continue;
 		}
 		int kNear[k_n] = {};
-		findKnearestPointIndex(kNear, n_warp, v_c);
+		findKnearestPointIndex(kNear, n_warp, v_c, -1);
 		double min_dis = std::numeric_limits<double>::max();
 		for (int k = 0; k < k_n; k++) {
-			if (n_warp.size() == 0) {
-				break;
+			if (kNear[k] < 0) {
+				continue;
 			}
 
 			double dis = (n_warp[kNear[k]].v - v_c).norm() / n_warp[kNear[k]].w;
@@ -939,9 +1140,9 @@ void raycastKernel(float3* vertex, float3* normal, uint2 inputSize,
 			dgnew.w = eps;
 			n_warp.push_back(dgnew);
 			std::cout << "added "<< "  " << dgnew.v  << std::endl;
+			std::cout << "added se3"<< "  " << dgnew.se3  << std::endl;
 		}
 	}
-
 	TOCK("raycastKernel", inputSize.x * inputSize.y);
 }
 
@@ -955,19 +1156,8 @@ bool updatePoseKernel(Matrix4 & pose, const float * output,
 	TooN::SE3<> delta(x);
 	pose = toMatrix4(delta) * pose;
 
-//	Matrix4 del_m4 = inverse(toMatrix4(delta));
-//	Eigen::Matrix4d del_e;
-//	matrix4ToEigen(&del_e, del_m4);
-//	std::cout << "del_m4" << del_m4.data[0].x << del_m4.data[0].y << del_m4.data[0].z << del_m4.data[0].w << std::endl;
-//	std::cout << "del_e" << del_e << std::endl;
-//	cur_pose = del_e * cur_pose;
-
+	// dynamic fusion
 	cur_pose = toMatrix4(delta) * cur_pose;
-//	Eigen::Matrix4d del_e;
-//	matrix4ToEigen(&del_e, del_m4);
-//	std::cout << "del_m4" << del_m4.data[0].x << del_m4.data[0].y << del_m4.data[0].z << del_m4.data[0].w << std::endl;
-//	std::cout << "del_e" << del_e << std::endl;
-//	cur_pose = del_e * cur_pose;
 
 	// Return validity test result of the tracking
 	if (norm(x) < icp_threshold)
@@ -1150,7 +1340,8 @@ bool Kfusion::tracking(float4 k, float icp_threshold, uint tracking_rate,
 	oldPose = pose;
 	const Matrix4 projectReference = getCameraMatrix(k) * inverse(raycastPose);
 
-	eigenTomatrix4(&cur_pose, Eigen::Matrix4d::Identity());
+	// dynamic fusion
+	eigenTomatrix4(cur_pose, Eigen::Matrix4d::Identity());
 
 	for (int level = iterations.size() - 1; level >= 0; --level) {
 		uint2 localimagesize = make_uint2(
@@ -1170,296 +1361,13 @@ bool Kfusion::tracking(float4 k, float icp_threshold, uint tracking_rate,
 
 		}
 	}
-//
-//	std::cout << "pose" << pose.data[0].x << pose.data[0].y << pose.data[0].z << pose.data[0].w << std::endl;
-//	std::cout << "pose" << pose.data[1].x << pose.data[1].y << pose.data[1].z << pose.data[1].w << std::endl;
-//	std::cout << "pose" << pose.data[2].x << pose.data[2].y << pose.data[2].z << pose.data[2].w << std::endl;
-//	std::cout << "pose" << pose.data[3].x << pose.data[3].y << pose.data[3].z << pose.data[3].w << std::endl;
-//
-//	std::cout << "cur_pose * oldPose" << (cur_pose * oldPose).data[0].x << (cur_pose * oldPose).data[0].y << (cur_pose * oldPose).data[0].z << (cur_pose * oldPose).data[0].w << std::endl;
-//	std::cout << "cur_pose * oldPose" << (cur_pose * oldPose).data[1].x << (cur_pose * oldPose).data[1].y << (cur_pose * oldPose).data[1].z << (cur_pose * oldPose).data[1].w << std::endl;
-//	std::cout << "cur_pose * oldPose" << (cur_pose * oldPose).data[2].x << (cur_pose * oldPose).data[2].y << (cur_pose * oldPose).data[2].z << (cur_pose * oldPose).data[2].w << std::endl;
-//	std::cout << "cur_pose * oldPose" << (cur_pose * oldPose).data[3].x << (cur_pose * oldPose).data[3].y << (cur_pose * oldPose).data[3].z << (cur_pose * oldPose).data[3].w << std::endl;
+
+	Matrix4 inv_cur = inverse(cur_pose);
 
 	bool rigid_return = checkPoseKernel(pose, oldPose, reductionoutput, computationSize,
 			track_threshold);
 
 	bool non_rigid_return = non_rigid_track(vertex, normal, n_warp, computationSize, getCameraMatrix(k), inputVertex[0]);
-
-}
-
-void so3Matrix(Eigen::Matrix3d* rm, Eigen::Vector3d v) {
-	*rm << 0, -v[2], v[1],
-	v[2], 0, -v[0],
-	-v[1], v[0], 0;
-}
-
-void matrix4ToEigen(Eigen::Matrix4d* o, Matrix4 i) {
-
-	float4 row0 = i.data[0];
-	float4 row1 = i.data[0];
-	float4 row2 = i.data[0];
-	float4 row3 = i.data[0];
-	*o << row0.x, row0.y, row0.z, row0.w,
-		  row1.x, row1.y, row1.z, row1.w,
-		  row2.x, row2.y, row2.z, row2.w,
-		  row3.x, row3.y, row3.z, row3.w;
-
-}
-
-void eigenTomatrix4(Matrix4* o, Eigen::Matrix4d i) {
-	for (int k = 0; k < 4; k++) {
-		(*o).data[k].x = i(k, 0);
-		(*o).data[k].y = i(k, 1);
-		(*o).data[k].z = i(k, 2);
-		(*o).data[k].w = i(k, 3);
-	}
-}
-
-/*dynamic fusion*/
-bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, uint2 size, Matrix4 cameraMatrix, float3* inputVertex) {
-	if (n_warp.size() == 0) {
-		return true;
-	}
-
-	// Reg term
-	int n_dp = n_warp.size();
-
-	//reset n_warp
-	for(int i = 0; i < n_dp; i++) {
-		Eigen::Matrix4d temp;
-		temp << 1,0,0,0,
-				0,1,0,0,
-				0,0,1,0,
-				0,0,0,1;
-		n_warp[i].se3 = temp;
-	}
-
-	Eigen::SparseMatrix<double> A_reg(n_dp * k_n * 3, n_dp * 6);
-	Eigen::VectorXd b_reg(n_dp * k_n * 3);
-	A_reg.setZero();
-
-	Eigen::Matrix4d cur_pose_eg;
-	matrix4ToEigen(&cur_pose_eg, cur_pose);
-	Eigen::Matrix4d rigid_t;
-	Eigen::Matrix4d inv_t;
-	Eigen::Matrix4d inv_r = Eigen::Matrix4d::Identity();
-
-	inv_t << 1, 0, 0, -cur_pose.data[0].w,
-			 0, 1, 0, -cur_pose.data[1].w,
-			 0, 0, 1, -cur_pose.data[2].w,
-			 0, 0, 0, 1;
-
-	std::cout << "inv_t" << inv_t << std::endl;
-	inv_r.block(0,0,3,3) = cur_pose_eg.block(0,0,3,3);
-	std::cout << "inv_r" << inv_r << std::endl;
-	Matrix4 inv_r_m4;
-	eigenTomatrix4(&inv_r_m4, inv_r);
-	Eigen::Matrix4d temp;
-	matrix4ToEigen(&temp, inverse(inv_r_m4));
-
-	inv_r.block(0,0,3,3) = temp.block(0,0,3,3);
-	std::cout << "cur_pose_eg.block(0,0,3,3)" << cur_pose_eg.block(0,0,3,3) << std::endl;
-	std::cout << "inv_r" << inv_r << std::endl;
-	rigid_t = inv_r * inv_t;
-
-	std::cout << "rigid_t" << rigid_t << std::endl;
-	for (int i = 0; i < n_dp; ++i) {
-		int kNear[k_n] = {};
-		//TODO not include it self
-		findKnearestPointIndex(kNear, n_warp, n_warp[i].v);
-		for (int k = 0; k < k_n; k++) {
-
-			int j = kNear[k];
-			double alpha = n_warp[j].w > n_warp[i].w ? n_warp[j].w : n_warp[i].w;
-			double con_a = pow(alpha, 0.5);
-
-			Eigen::Vector3d ridgv =  rigid_t.block(0,0,3,3) * n_warp[i].v;
-
-			//std::cout << "rigid_t.block(0,0,3,3) " << k << "  " << rigid_t.block(0,0,3,3)  << std::endl;
-
-			A_reg.coeffRef((i * k_n + k)*3, i * 6) = 0;
-			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6) = -con_a * ridgv[2];
-			A_reg.coeffRef((i * k_n + k)*3 + 2, i * 6) = con_a * ridgv[1];
-
-			A_reg.coeffRef((i * k_n + k)*3, i * 6 + 1) = con_a * ridgv[2];
-			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6 + 1) = 0;
-			A_reg.coeffRef((i * k_n + k)*3 + 2, i * 6 + 1) = -con_a * ridgv[0];
-
-			A_reg.coeffRef((i * k_n + k)*3, i * 6 + 2) = -con_a * ridgv[1];
-			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6 + 2) = con_a * ridgv[0];
-			A_reg.coeffRef((i * k_n + k)*3 + 2, i*6 + 2) = 0;
-
-			A_reg.coeffRef((i * k_n + k)*3, i * 6 + 3) = con_a;
-			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6 + 4) = con_a;
-			A_reg.coeffRef((i * k_n + k)*3 + 2, i * 6 + 5) = con_a;
-
-			Eigen::Vector3d rjdgv =  rigid_t.block(0,0,3,3) * n_warp[j].v;
-
-			A_reg.coeffRef((i * k_n + k)*3, j * 6) = 0;
-			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6) = con_a * rjdgv[2];
-			A_reg.coeffRef((i * k_n + k)*3 + 2, j * 6) = -con_a * rjdgv[1];
-
-			A_reg.coeffRef((i * k_n + k)*3, j * 6 + 1) = -con_a * rjdgv[2];
-			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6 + 1) = 0;
-			A_reg.coeffRef((i * k_n + k)*3 + 2, j*6 + 1) = con_a * rjdgv[0];
-
-			A_reg.coeffRef((i * k_n + k)*3, j * 6 + 2) = con_a * rjdgv[1];
-			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6 + 2) = -con_a * rjdgv[0];
-			A_reg.coeffRef((i * k_n + k)*3 + 2, j * 6 + 2) = 0;
-
-			A_reg.coeffRef((i * k_n + k)*3, j * 6 + 3) = -con_a;
-			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6 + 4) = -con_a;
-			A_reg.coeffRef((i * k_n + k)*3 + 2, j * 6 + 5) = -con_a;
-
-			Eigen::Vector3d ti =  rigid_t.block(0,3,3,1);
-			Eigen::Vector3d tj =  rigid_t.block(0,3,3,1);
-			Eigen::Vector3d t =  con_a * (ridgv - rjdgv + ti - tj);
-
-			b_reg((i * k_n + k)*3) = t[0];
-			b_reg((i * k_n + k)*3 + 1) = t[1];
-			b_reg((i * k_n + k)*3 + 2) = t[2];
-		}
-	}
-
-	// Data term
-	Eigen::SparseMatrix<double> A_data(size.x * size.y, n_dp * 6);
-	Eigen::VectorXd b_data(size.x * size.y);
-	A_data.setZero();
-	int pixelx, pixely;
-	for (pixely = 0; pixely < size.y; pixely++) {
-		for (pixelx = 0; pixelx < size.x; pixelx++) {
-
-			float3 f3v_u = vertex[pixelx + pixely * size.x];
-			Eigen::Vector3d v_u(f3v_u.x, f3v_u.y, f3v_u.z);
-			float3 f3n_u = normal[pixelx + pixely * size.x];
-			Eigen::Vector3d n_u(f3n_u.x, f3n_u.y, f3n_u.z);
-
-			Eigen::Matrix4d w;
-			getWarpMatrix(&w, v_u);
-			Eigen::Matrix4d eigenCameraMatrix;
-			matrix4ToEigen(&eigenCameraMatrix, cameraMatrix);
-
-			Eigen::Vector3d v_hat_u = rigid_t.block(0,0,3,3) * v_u + rigid_t.block(0,3,3,1);
-			Eigen::Vector3d projected_u_hat = eigenCameraMatrix.block(0,0,3,3) * v_hat_u + eigenCameraMatrix.block(0,3,3,1);
-			//Eigen::Vector3d projected_u_hat = eigenCameraMatrix.block(0,0,3,3) * (w.block(0,0,3,3) * v_u + w.block(0,3,3,1))
-			//		+ eigenCameraMatrix.block(0,3,3,1);
-			Eigen::Vector2i pixel_u;
-
-			pixel_u << int(projected_u_hat[0] / projected_u_hat[2] + 0.5),
-					int(projected_u_hat[1] / projected_u_hat[2] + 0.5);
-			if (pixel_u[0] < 0 || pixel_u[0] > size.x - 1
-					|| pixel_u[1] < 0 || pixel_u[1] > size.y - 1) {
-				continue;
-			}
-
-			int kNear[k_n] = {};
-			findKnearestPointIndex(kNear, n_warp, v_u);
-
-			Eigen::Vector3d C_n(0, 0, 0);
-			Eigen::Vector3d C_v(0, 0, 0);
-			double eta = 0;
-
-			for (int k = 0; k < k_n; k++) {
-				n_i d_p = n_warp[kNear[k]];
-				C_n += d_p.w * rigid_t.block(0,0,3,3) * n_u;
-				C_v += d_p.w * (rigid_t.block(0,0,3,3) * v_u + rigid_t.block(0,3,3,1));
-
-				eta += d_p.w;
-			}
-			C_n /= eta;
-			C_v /= eta;
-
-			float3 vlf3 = inputVertex[pixel_u[0] + pixel_u[1] * size.x];
-			Eigen::Vector3d vl(vlf3.x, vlf3.y, vlf3.z);
-			Eigen::Vector3d D_v = C_v - vl;
-
-			for (int k = 0; k < k_n; k++) {
-				n_i d_p = n_warp[kNear[k]];
-
-				Eigen::Vector3d rn = rigid_t.block(0,0,3,3) * n_u;
-				Eigen::Matrix3d rnm;
-				so3Matrix(&rnm, rn);
-
-				Eigen::Vector3d rv = rigid_t.block(0,0,3,3) * v_u;
-				Eigen::Matrix3d rvm;
-				so3Matrix(&rvm, rv);
-
-				Eigen::RowVector3d c_r = d_p.w * (D_v.transpose() * -rnm +
-						C_n.transpose() * rvm) / eta;
-
-				Eigen::RowVector3d c_t = d_p.w / eta * C_n.transpose();
-
-				int j = kNear[k];
-				A_data.coeffRef(pixelx + pixely * size.x, j * 6) = c_r[0];
-				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 1) = c_r[1];
-				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 2) = c_r[2];
-
-				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 3) = c_t[0];
-				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 4) = c_t[1];
-				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 5) = c_t[2];
-			}
-
-			b_data(pixelx + pixely * size.x) = C_n.transpose() * D_v;
-
-		}
-	}
-	float w_data = 1;
-	float w_reg = 200;
-
-	std::cout << "n_dp" << n_dp << std::endl;
-
-//	std::cout << "A_reg" << A_reg << std::endl;
-//	std::cout << "A_data" << A_data << std::endl;
-//	std::cout << " A_reg" <<  A_reg << std::endl;
-//	std::cout << " A_reg.transpose()*A_reg" <<  A_reg.transpose()*A_reg << std::endl;
-//	std::cout << "A_data.transpose()*A_data" << A_data.transpose()*A_data << std::endl;
-//	std::cout << "w_reg * A_reg.transpose()*A_reg + w_data * A_data.transpose()*A_data" << w_reg * A_reg.transpose()*A_reg + w_data * A_data.transpose()*A_data << std::endl;
-
-	Eigen::CholmodSimplicialLDLT< Eigen::SparseMatrix<double> >solver;
-	solver.compute(w_reg * A_reg.transpose()*A_reg + w_data * A_data.transpose()*A_data);
-
-	if(solver.info() != Eigen::Success)
-	{
-	    // decomposition failed
-	    std::cout<<"Decomposition failed" << std::endl;
-	    return false;
-	}
-
-	std::cout << "solved" << std::endl;
-	Eigen::VectorXd x_update;
-	Eigen::VectorXd Axb = -1.0f*(w_reg * A_reg.transpose()*b_reg + w_data * A_data.transpose()*b_data);
-	x_update = solver.solve(Axb);
-
-	std::cout<<"norm of x_update = " << x_update.norm() << std::endl;
-	//TODO Set a timer here
-	//std::cout<<"solver time elapsed = " << solver_timer.elapsed() << std::endl;
-
-	// Updates
-	for(int i = 0 ; i < n_dp;i++)
-	{
-	    // Get the rotation update
-	    Eigen::Vector3d so3_i(x_update(6*i+0), x_update(6*i+1), x_update(6*i+2));
-
-	    // Get the translation update
-	    Eigen::Vector3d t_i(x_update(6*i+3), x_update(6*i+4), x_update(6*i+5));
-
-	    Eigen::Matrix3d r_i;
-  	    so3Matrix(&r_i, so3_i);
-
-	    Eigen::Matrix3d o_r = n_warp[i].se3.block(0,0,3,3);
-	    Eigen::Vector3d o_t = n_warp[i].se3.block(0,3,3,1);
-
-	    Eigen::Matrix3d n_r = r_i * o_r;
-	    Eigen::Vector3d n_t = o_t + t_i;
-
-	    Eigen::Matrix4d n_w;
-	    n_w << n_r, n_t,
-	    	   0,0,0,1;
-	    n_warp[i].se3 = n_w;
-	    std::cout<<"pose("<<i<<") = "<< n_w << std::endl;
-	}
-	return true;
 }
 
 bool Kfusion::raycasting(float4 k, float mu, uint frame) {
