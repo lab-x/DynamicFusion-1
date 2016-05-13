@@ -1098,8 +1098,23 @@ void raycastKernel(float3* vertex, float3* normal, uint2 inputSize,
 					farPlane, step, largestep);
 			if (hit.w > 0.0) {
 				// TODO use getWarp to update shape here
-				vertex[pos.x + pos.y * inputSize.x] = make_float3(hit);
-				float3 surfNorm = integration.grad(make_float3(hit));
+				float3 f3_hit = make_float3(hit);
+				vertex[pos.x + pos.y * inputSize.x] = f3_hit;
+				float3 surfNorm = integration.grad(f3_hit);
+
+				Eigen::Vector4d e_x(f3_hit.x, f3_hit.y, f3_hit.z, 1);
+				Eigen::Vector3d e_n(surfNorm.x, surfNorm.y, surfNorm.z);
+				Eigen::Matrix4d defT;
+				// TODO debug here why warpm always identity
+				getWarpMatrix(&defT, e_x.block(0,0,3,1));
+				if (defT != Eigen::Matrix4d::Identity()) {
+					std::cout << "deft" << defT << std::endl;
+				}
+				Eigen::Vector4d e_hit = defT * e_x;
+				Eigen::Vector3d e_sn = defT.block(0,0,3,3) * e_n;
+				vertex[pos.x + pos.y * inputSize.x] = make_float3(e_hit(0), e_hit(1), e_hit(2));
+				surfNorm = make_float3(e_sn(0), e_sn(1), e_sn(2));
+
 				if (length(surfNorm) == 0) {
 					//normal[pos] = normalize(surfNorm); // APN added
 					normal[pos.x + pos.y * inputSize.x].x = INVALID;
