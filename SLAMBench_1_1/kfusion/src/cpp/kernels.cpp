@@ -167,7 +167,11 @@ void getWarpMatrix(Eigen::Matrix4d* out, Eigen::Vector3d x) {
 }
 
 //dynamic fusion
-bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, uint2 size, Matrix4 cameraMatrix, float3* inputVertex) {
+bool non_rigid_track(float3* vertex, float3* normal,
+					std::vector<n_i> n_warp, uint2 size,
+					Matrix4 cameraMatrix,
+					float3* inputVertex)
+{
 
 	if (n_warp.size() == 0) {
 		return true;
@@ -200,58 +204,67 @@ bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, ui
 //{
 	for (i = 0; i < n_dp; ++i) {
 		int kNear[k_n] = {};
+
+		/// For each deformation node, we are trying to search for the
+		/// vertices near to it.
+
 		findKnearestPointIndex(kNear, n_warp, n_warp[i].v, i);
-		for (int k = 0; k < k_n; k++) {
+
+		for (int k = 0; k < k_n; k++)
+		{
 			if (kNear[k] < 0) {
 				return false;
 			}
+
 			int j = kNear[k];
+
+			/// find the max of the weight of two vertices
 			double alpha = n_warp[j].w > n_warp[i].w ? n_warp[j].w : n_warp[i].w;
 			double con_a = pow(alpha, 0.5);
 
-			Eigen::Vector3d ridgv =  rigid_t.block(0,0,3,3) * n_warp[i].v;
+			Eigen::Vector3d ridgv =  rigid_t.block(0,0,3,3) * n_warp[j].v;
 
 			//std::cout << "rigid_t.block(0,0,3,3) " << k << "  " << rigid_t.block(0,0,3,3)  << std::endl;
 
 			A_reg.coeffRef((i * k_n + k)*3, i * 6) = 0;
-			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6) = -con_a * ridgv[2];
-			A_reg.coeffRef((i * k_n + k)*3 + 2, i * 6) = con_a * ridgv[1];
+			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6)      = -con_a * ridgv[2];
+			A_reg.coeffRef((i * k_n + k)*3 + 2, i * 6)      = con_a * ridgv[1];
 
-			A_reg.coeffRef((i * k_n + k)*3, i * 6 + 1) = con_a * ridgv[2];
-			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6 + 1) = 0;
-			A_reg.coeffRef((i * k_n + k)*3 + 2, i * 6 + 1) = -con_a * ridgv[0];
+			A_reg.coeffRef((i * k_n + k)*3, i * 6 + 1)      = con_a * ridgv[2];
+			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6 + 1)  = 0;
+			A_reg.coeffRef((i * k_n + k)*3 + 2, i * 6 + 1)  = -con_a * ridgv[0];
 
-			A_reg.coeffRef((i * k_n + k)*3, i * 6 + 2) = -con_a * ridgv[1];
-			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6 + 2) = con_a * ridgv[0];
-			A_reg.coeffRef((i * k_n + k)*3 + 2, i*6 + 2) = 0;
+			A_reg.coeffRef((i * k_n + k)*3, i * 6 + 2)      = -con_a * ridgv[1];
+			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6 + 2)  = con_a * ridgv[0];
+			A_reg.coeffRef((i * k_n + k)*3 + 2, i*6 + 2)    = 0;
 
-			A_reg.coeffRef((i * k_n + k)*3, i * 6 + 3) = con_a;
-			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6 + 4) = con_a;
-			A_reg.coeffRef((i * k_n + k)*3 + 2, i * 6 + 5) = con_a;
+			A_reg.coeffRef((i * k_n + k)*3, i * 6 + 3)      = con_a;
+			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6 + 4)  = con_a;
+			A_reg.coeffRef((i * k_n + k)*3 + 2, i * 6 + 5)  = con_a;
 
 			Eigen::Vector3d rjdgv =  rigid_t.block(0,0,3,3) * n_warp[j].v;
 
-			A_reg.coeffRef((i * k_n + k)*3, j * 6) = 0;
-			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6) = con_a * rjdgv[2];
-			A_reg.coeffRef((i * k_n + k)*3 + 2, j * 6) = -con_a * rjdgv[1];
+			A_reg.coeffRef((i * k_n + k)*3, j * 6)          = 0;
+			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6)      = con_a * rjdgv[2];
+			A_reg.coeffRef((i * k_n + k)*3 + 2, j * 6)      = -con_a * rjdgv[1];
 
-			A_reg.coeffRef((i * k_n + k)*3, j * 6 + 1) = -con_a * rjdgv[2];
-			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6 + 1) = 0;
-			A_reg.coeffRef((i * k_n + k)*3 + 2, j*6 + 1) = con_a * rjdgv[0];
+			A_reg.coeffRef((i * k_n + k)*3, j * 6 + 1)      = -con_a * rjdgv[2];
+			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6 + 1)  = 0;
+			A_reg.coeffRef((i * k_n + k)*3 + 2, j*6 + 1)    = con_a * rjdgv[0];
 
-			A_reg.coeffRef((i * k_n + k)*3, j * 6 + 2) = con_a * rjdgv[1];
-			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6 + 2) = -con_a * rjdgv[0];
-			A_reg.coeffRef((i * k_n + k)*3 + 2, j * 6 + 2) = 0;
+			A_reg.coeffRef((i * k_n + k)*3, j * 6 + 2)      = con_a * rjdgv[1];
+			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6 + 2)  = -con_a * rjdgv[0];
+			A_reg.coeffRef((i * k_n + k)*3 + 2, j * 6 + 2)  = 0;
 
-			A_reg.coeffRef((i * k_n + k)*3, j * 6 + 3) = -con_a;
-			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6 + 4) = -con_a;
-			A_reg.coeffRef((i * k_n + k)*3 + 2, j * 6 + 5) = -con_a;
+			A_reg.coeffRef((i * k_n + k)*3, j * 6 + 3)      = -con_a;
+			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6 + 4)  = -con_a;
+			A_reg.coeffRef((i * k_n + k)*3 + 2, j * 6 + 5)  = -con_a;
 
 			Eigen::Vector3d ti =  rigid_t.block(0,3,3,1);
 			Eigen::Vector3d tj =  rigid_t.block(0,3,3,1);
 			Eigen::Vector3d t =  con_a * (ridgv - rjdgv + ti - tj);
 
-			b_reg((i * k_n + k)*3) = t[0];
+			b_reg((i * k_n + k)*3)     = t[0];
 			b_reg((i * k_n + k)*3 + 1) = t[1];
 			b_reg((i * k_n + k)*3 + 2) = t[2];
 		}
@@ -311,6 +324,11 @@ bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, ui
 			Eigen::Vector3d vl(vlf3.x, vlf3.y, vlf3.z);
 			Eigen::Vector3d D_v = C_v - vl;
 
+			std::cout << "C_v" << C_v << std::endl;
+			std::cout << "D_v" << D_v << std::endl;
+			std::cout << "vl" << vl << std::endl;
+			std::cout << "pixel_u" << pixel_u << std::endl;
+
 			for (int k = 0; k < k_n; k++) {
 				n_i d_p = n_warp[kNear[k]];
 
@@ -328,7 +346,7 @@ bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, ui
 				Eigen::RowVector3d c_t = d_p.w / eta * C_n.transpose();
 
 				int j = kNear[k];
-				A_data.coeffRef(pixelx + pixely * size.x, j * 6) = c_r[0];
+				A_data.coeffRef(pixelx + pixely * size.x, j * 6)     = c_r[0];
 				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 1) = c_r[1];
 				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 2) = c_r[2];
 
@@ -337,7 +355,7 @@ bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, ui
 				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 5) = c_t[2];
 			}
 
-			b_data(pixelx + pixely * size.x) = C_n.transpose() * D_v;
+			b_data(pixelx + pixely * size.x) = 0;//C_n.transpose() * D_v;
 
 		}
 	}
@@ -359,6 +377,9 @@ bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, ui
 //	std::cout << "A_data.transpose()*A_data" << A_data.transpose()*A_data << std::endl;
 //	std::cout << "w_reg * A_reg.transpose()*A_reg + w_data * A_data.transpose()*A_data" << w_reg * A_reg.transpose()*A_reg + w_data * A_data.transpose()*A_data << std::endl;
 
+
+//	std::cout<<"b_data = "<< b_data <<std::endl;
+
 	Eigen::CholmodSimplicialLDLT< Eigen::SparseMatrix<double> >solver;
 	solver.compute(w_reg * A_reg.transpose()*A_reg + w_data * A_data.transpose()*A_data + w_lm * A_lm);
 
@@ -374,7 +395,7 @@ bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, ui
 	Eigen::VectorXd Axb = -1.0f * (w_reg * A_reg.transpose() * b_reg + w_data * A_data.transpose() * b_data);
 	x_update = solver.solve(Axb);
 
-	std::cout<<"norm of x_update = " << x_update.norm() << std::endl;
+//	std::cout<<"norm of x_update = " << x_update.norm() << std::endl;
 	//TODO Set a timer here
 	//std::cout<<"solver time elapsed = " << solver_timer.elapsed() << std::endl;
 
@@ -445,9 +466,9 @@ bool test_non_rigid_track(float3* vertex, uint2 size, Matrix4 cameraMatrix, floa
 }
 
 void so3Matrix(Eigen::Matrix3d* rm, Eigen::Vector3d v) {
-	*rm << 0, -v[2], v[1],
-	v[2], 0, -v[0],
-	-v[1], v[0], 0;
+	*rm << 1, -v[2], v[1],
+	v[2], 1, -v[0],
+	-v[1], v[0], 1;
 }
 
 void matrix4ToEigen(Eigen::Matrix4d* o, Matrix4 i) {
@@ -1380,25 +1401,44 @@ void renderVolumeKernel(uchar4* out, const uint2 depthSize, const Volume volume,
         shared(out), private(y)
 	for (y = 0; y < depthSize.y; y++) {
 		for (unsigned int x = 0; x < depthSize.x; x++) {
-			const uint pos = x + y * depthSize.x;
+			uint pos = x + y * depthSize.x;
 
 			float4 hit = raycast(volume, make_uint2(x, y), view, nearPlane,
 					farPlane, step, largestep);
 			if (hit.w > 0) {
-				const float3 test = make_float3(hit);
-				const float3 surfNorm = volume.grad(test);
+				float3 test = make_float3(hit);
+				float3 surfNorm = volume.grad(test);
+/*
+				Eigen::Vector3d v_u(test.x, test.y, test.z);
+				Eigen::Vector3d n_u(surfNorm.x, surfNorm.y, surfNorm.z);
+
+				Eigen::Matrix4d w = Eigen::Matrix4d::Identity();
+				//getWarpMatrix(&w, v_u);
+
+				v_u = w.block(0,0,3,3) * v_u + w.block(0,3,3,1);
+				n_u = w.block(0,0,3,3) * n_u;
+				Eigen::Vector2i pixel_u;
+				v_u = v_u / v_u[2]
+				//pos = pixel_u[0] + pixel_u[1] * depthSize.x;
+				test = make_float3(v_u[0], v_u[1], v_u[2]);
+				surfNorm = make_float3(n_u[0], n_u[1], n_u[2]);
+*/
 				if (length(surfNorm) > 0) {
 					const float3 diff = normalize(light - test);
 					const float dir = fmaxf(dot(normalize(surfNorm), diff),
 							0.f);
 					const float3 col = clamp(make_float3(dir) + ambient, 0.f,
 							1.f) * 255;
-					out[pos] = make_uchar4(col.x, col.y, col.z, 0); // The forth value is a padding to align memory
+
+					out[pos] = make_uchar4(col.x, col.y, col.z, 0);
+					//out[pos] = make_uchar4(col.x, col.y, col.z, 0); // The forth value is a padding to align memory
 				} else {
-					out[pos] = make_uchar4(0, 0, 0, 0); // The forth value is a padding to align memory
+					out[pos] = make_uchar4(0, 0, 0, 0);
+					//out[pos] = make_uchar4(0, 0, 0, 0); // The forth value is a padding to align memory
 				}
 			} else {
-				out[pos] = make_uchar4(0, 0, 0, 0); // The forth value is a padding to align memory
+				out[pos] = make_uchar4(0, 0, 0, 0);
+				//out[pos] = make_uchar4(0, 0, 0, 0); // The forth value is a padding to align memory
 			}
 		}
 	}
