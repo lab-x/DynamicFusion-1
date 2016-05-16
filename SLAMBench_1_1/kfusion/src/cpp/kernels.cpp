@@ -168,11 +168,11 @@ void getWarpMatrix(Eigen::Matrix4d* out, Eigen::Vector3d x) {
 
 //dynamic fusion
 bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, uint2 size, Matrix4 cameraMatrix, float3* inputVertex) {
-	std::cout << "rigid_t"  << std::endl;
+
 	if (n_warp.size() == 0) {
 		return true;
 	}
-	std::cout << "rigid_t 111"  << std::endl;
+
 	// Reg term
 	int n_dp = n_warp.size();
 
@@ -259,7 +259,6 @@ bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, ui
 //}
 	// Data term
 	Eigen::SparseMatrix<double> A_data(size.x * size.y, n_dp * 6);
-	std::cout << "size" << size.x * size.y << std::endl;
 	Eigen::VectorXd b_data(size.x * size.y);
 	A_data.setZero();
 	int pixelx, pixely;
@@ -370,7 +369,7 @@ bool non_rigid_track(float3* vertex, float3* normal, std::vector<n_i> n_warp, ui
 	    return false;
 	}
 
-	std::cout << "solved" << std::endl;
+	std::cout << "solved, - n_dp:" << n_dp << std::endl;
 	Eigen::VectorXd x_update;
 	Eigen::VectorXd Axb = -1.0f * (w_reg * A_reg.transpose() * b_reg + w_data * A_data.transpose() * b_data);
 	x_update = solver.solve(Axb);
@@ -1031,28 +1030,26 @@ void integrateKernel(Volume vol, const float* depth, uint2 depthSize,
 	const float3 d_v = make_float3(0, 0, vol.dim.z / vol.size.z);
 	const float3 cameraDelta = rotate(K, delta);
 	unsigned int y;
+	std::cout << "integrate kernel starts" << std::endl;
 #pragma omp parallel for \
         shared(vol), private(y)
 	for (y = 0; y < vol.size.y; y++)
 		for (unsigned int x = 0; x < vol.size.x; x++) {
 
 			uint3 pix = make_uint3(x, y, 0); //pix.x = x;pix.y = y;
-			float3 p_o = vol.pos(pix);
-			float3 pos_o = invTrack * vol.pos(pix);
-			float3 cameraX_o = K * pos_o;
+			float3 pos = invTrack * vol.pos(pix);
+			//float3 cameraX = K * pos;
 
 			for (pix.z = 0; pix.z < vol.size.z;
-					++pix.z) {	//,pos += delta, cameraX += cameraDelta) {
-				float3 pos = invTrack * vol.pos(pix);
-				Eigen::Vector3d e_x(pos.x, pos.y, pos.z);
-				Eigen::Matrix4d defT = Eigen::Matrix4d::Identity();
-				// getWarpMatrix(&defT, e_x);
-				e_x = defT.block(0,0,3,3) * e_x + defT.block(0,3,3,1);
-				float3 cameraX = K * make_float3(e_x(0), e_x(1), e_x(2));
-				if (pix.z != 0) {
-					pos_o += delta; cameraX_o += cameraDelta; p_o += d_v;
-				}
-				std::cout << (p_o - vol.pos(pix)).x << (p_o - vol.pos(pix)).y << (p_o - vol.pos(pix)).z <<std::endl;
+					++pix.z, pos += delta) {
+				//++pix.z, pos += delta, cameraX += cameraDelta) {
+				//Eigen::Vector3d e_x(pos.x, pos.y, pos.z);
+				//Eigen::Matrix4d defT;
+				//getWarpMatrix(&defT, e_x);
+				//Matrix4 m4_w;
+				//eigenTomatrix4(m4_w, defT);
+				//float3 cameraX = K * (m4_w * pos);
+				float3 cameraX = K * (pos);
 
 				if (pos.z < 0.0001f) // some near plane constraint
 					continue;
@@ -1079,6 +1076,7 @@ void integrateKernel(Volume vol, const float* depth, uint2 depthSize,
 				}
 			}
 		}
+	std::cout << "integrate kernel ends" << std::endl;
 	TOCK("integrateKernel", vol.size.x * vol.size.y);
 //	for (y = 0; y < vol.size.y; y++)
 //		for (unsigned int x = 0; x < vol.size.x; x++) {
@@ -1471,6 +1469,7 @@ bool Kfusion::tracking(float4 k, float icp_threshold, uint tracking_rate,
 
 	bool non_rigid_return = non_rigid_track(vertex, normal, n_warp, computationSize, getCameraMatrix(k), inputVertex[0]);
 	// test_non_rigid_track(vertex, computationSize, getCameraMatrix(k), inputVertex[0]);
+	std::cout << "non_rigid tracking end" << std::endl;
 }
 
 bool Kfusion::raycasting(float4 k, float mu, uint frame) {
