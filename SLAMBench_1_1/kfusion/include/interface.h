@@ -188,7 +188,7 @@ public:
 			}
 		} else {
 			char fileNamepng[200];
-			sprintf(fileNamepng,"%s/test_%05d.png",this->_dir.c_str(),_frame + 630);
+			sprintf(fileNamepng,"%s/test_%05d.png",this->_dir.c_str(),_frame + 700);
 			std::cout<<"Trying to read file from: " << fileNamepng << std::endl;
 			CVD::Image<u_int16_t>DEPTHPNG;
 			CVD::img_load(DEPTHPNG, fileNamepng);
@@ -207,18 +207,6 @@ public:
 				}
 			}
 		}
-		
-
-	
-		char fileNamepng[200];
-		sprintf(fileNamepng,"%s/test_%05d.png",this->_dir.c_str(),_frame);
-		std::cout<<"Trying to read file from: " << fileNamepng << std::endl;
-		
-		CVD::Image<u_int16_t>DEPTHPNG;
-		CVD::img_load(DEPTHPNG, fileNamepng);
-
-		//std::cout << "_scenewidth" << _scenewidth << std::endl;
-	    //std::cout << "_sceneheight" << _sceneheight << std::endl;
 
 		for (int v = 0; v < _sceneheight; v++) 
 		{
