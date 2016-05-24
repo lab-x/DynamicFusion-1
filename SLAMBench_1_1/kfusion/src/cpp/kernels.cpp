@@ -381,7 +381,7 @@ bool non_rigid_track(float3* vertex, float3* normal,
 
 	std::cout << "solved, - n_dp:" << n_dp << std::endl;
 	Eigen::VectorXd x_update;
-	Eigen::VectorXd Axb = (w_reg * A_reg.transpose() * b_reg + w_data * A_data.transpose() * b_data);
+	Eigen::VectorXd Axb = -1.0f * (w_reg * A_reg.transpose() * b_reg + w_data * A_data.transpose() * b_data);
 	x_update = solver.solve(Axb);
 
     std::cout<<"norm of x_update = " << x_update.norm()/ (n_dp) << std::endl;
@@ -1250,7 +1250,7 @@ void raycastKernel(float3* vertex, float3* normal, uint2 inputSize,
 			dgnew.se3 = wm;
 			dgnew.w = eps;
 			n_warp.push_back(dgnew);
-			//std::cout << "added "<< "  " << dgnew.v  << std::endl;
+			std::cout << "added "<< "  " << dgnew.v  << std::endl;
 			//std::cout << "added se3"<< "  " << dgnew.se3  << std::endl;
 		}
 	}

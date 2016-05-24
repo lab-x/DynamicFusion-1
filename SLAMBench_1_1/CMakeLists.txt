@@ -31,6 +31,11 @@ endif(APPLE)
 
 set(main_common_compile_flags ${compile_flags})
 
+find_package(CVD)
+INCLUDE_DIRECTORIES(${CVD_INCLUDE_DIR})
+link_libraries(${CVD_LIBRARY})
+
+
 if (OPENNI2_FOUND)
     include_directories(${OPENNI2_INCLUDE_PATHS})
     set(main_common_libraries ${main_common_libraries} ${OPENNI2_LIBRARIES})

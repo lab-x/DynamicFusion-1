@@ -18,6 +18,8 @@ find_package(Qt5OpenGL)
 find_package(Qt5PrintSupport)
 #find_package(SuiteSparse)
 
+find_package(CVD)
+
 include_directories(./include ${TOON_INCLUDE_PATHS} ./thirdparty)
 
  # ---- PREPARE COMMON DEPENDENCIES  ------------ 
@@ -60,6 +62,11 @@ if (OPENCL_FOUND)
     add_version(${appname} opencl "" "")
 endif(OPENCL_FOUND)
 
+
+#if (CVD_FOUND)
+	include_directories(${CVD_INCLUDE_DIR})
+	link_libraries(${CVD_LIBRARY})
+#endif(CVD_FOUND)
 
  #  ----------------- CUDA VERSION ----------------- 
 if (CUDA_FOUND) 
