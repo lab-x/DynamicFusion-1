@@ -37,6 +37,7 @@ static uchar4 * trackRender = NULL;
 static uchar4 * volumeRender = NULL;
 static DepthReader *reader = NULL;
 static Kfusion *kfusion = NULL;
+int count = 0;
 /*
  int          compute_size_ratio = default_compute_size_ratio;
  std::string  input_file         = "";
@@ -100,6 +101,7 @@ int main(int argc, char ** argv) {
 	reader = createReader(&config);
 
 	//  =========  BASIC PARAMETERS  (input size / computation size )  =========
+	//TODO
 	uint2 inputSize =
 			(reader != NULL) ? reader->getinputSize() : make_uint2(640, 480);
 	const uint2 computationSize = make_uint2(
@@ -139,6 +141,7 @@ int main(int argc, char ** argv) {
 			drawthem(inputRGB, depthRender, trackRender, volumeRender,
 					trackRender, kfusion->getComputationResolution());
 		}
+
 #endif
 	} else {
 		if ((reader == NULL) || (reader->cameraActive == false)) {
@@ -245,6 +248,20 @@ int processAll(DepthReader *reader, bool processFrame, bool renderImages,
 				(processFrame ? reader->getFrameNumber() - frameOffset : 0),
 				config->rendering_rate, camera, 0.75 * config->mu);
 		timings[6] = tock();
+		CVD::Image< CVD::Rgb<CVD::byte> >depthmap(CVD::ImageRef(320,240));
+		for(int i=0; i< 240; i++)
+		{
+			for(int j=0; j< 320; j++)
+			{
+				CVD::Rgb<CVD::byte> colour(volumeRender[i*320 + j].x, volumeRender[i*320 + j].y, volumeRender[i*320 + j].z);
+				depthmap[CVD::ImageRef(j,i)] = colour;
+			}
+		}
+
+		char fileName[200];
+		std::sprintf(fileName,"test_res_%05d.png",count++);
+		//std::cout << "save " << fileName << std::endl;
+		CVD::img_save(depthmap, fileName);
 	}
 
 	if (processFrame) {

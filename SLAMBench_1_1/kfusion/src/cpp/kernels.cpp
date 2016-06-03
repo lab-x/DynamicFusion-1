@@ -7,7 +7,8 @@
 
  */
 #include <kernels.h>
-
+#include <cvd/image_io.h>
+#include <cvd/image_ref.h>
 #ifdef __APPLE__
 #include <mach/clock.h>
 #include <mach/mach.h>
@@ -53,6 +54,7 @@ Matrix4 oldPose;
 Matrix4 raycastPose;
 float3 ** inputVertex;
 float3 ** inputNormal;
+int frame_count = 0;
 
 // dynamic fusion
 Matrix4 cur_pose;
@@ -302,6 +304,14 @@ bool non_rigid_track(float3* vertex, float3* normal,
 				continue;
 			}
 
+			float3 vlf3 = inputVertex[pixel_u[0] + pixel_u[1] * size.x];
+			Eigen::Vector3d vl(vlf3.x, vlf3.y, vlf3.z);
+
+			if (vl.norm() < er) {
+				continue;
+			}
+
+
 			int kNear[k_n] = {};
 			findKnearestPointIndex(kNear, n_warp, v_u, -1);
 
@@ -320,8 +330,6 @@ bool non_rigid_track(float3* vertex, float3* normal,
 			C_n.normalize();
 			C_v /= eta;
 
-			float3 vlf3 = inputVertex[pixel_u[0] + pixel_u[1] * size.x];
-			Eigen::Vector3d vl(vlf3.x, vlf3.y, vlf3.z);
 			Eigen::Vector3d D_v = C_v - vl;
 
 //			std::cout << "D_v norm" << D_v.norm() << std::endl;
@@ -358,9 +366,70 @@ bool non_rigid_track(float3* vertex, float3* normal,
 		}
 	}
 //}
+
 	float w_data = 0.5;
 	float w_reg = 100;
-	float w_lm = 0; //1E-10;
+	float w_lm = 1E-12;
+
+	float reg = 0;
+	for (int i = 0; i < n_dp; i ++) {
+		int kNear[k_n] = {};
+		findKnearestPointIndex(kNear, n_warp, n_warp[i].v, i);
+		for (int k = 0; k < k_n; k++) {
+			int j = kNear[k];
+			double alpha = n_warp[j].w > n_warp[i].w ? n_warp[j].w : n_warp[i].w;
+			Eigen::Matrix4d Ti;
+			getWarpMatrix(&Ti, n_warp[i].v);
+			Eigen::Matrix4d Tj;
+			getWarpMatrix(&Tj, n_warp[j].v);
+			Eigen::Vector3d tidgv =  Ti.block(0,0,3,3) * n_warp[j].v + Ti.block(0,3,3,1);
+			Eigen::Vector3d tjdgv =  Tj.block(0,0,3,3) * n_warp[j].v + Tj.block(0,3,3,1);
+			Eigen::Vector3d v = tidgv - tjdgv;
+			reg += 0.5 * alpha * ((v.transpose() * v)[0]);
+		}
+	}
+
+	std::cout << " " << reg;
+
+	float data = 0;
+
+	for (pixely = 0; pixely < size.y; pixely++) {
+		for (pixelx = 0; pixelx < size.x; pixelx++) {
+			float3 f3v_u = vertex[pixelx + pixely * size.x];
+			Eigen::Vector3d v_u(f3v_u.x, f3v_u.y, f3v_u.z);
+			Eigen::Vector3d r_v_u = rigid_t.block(0,0,3,3) * v_u + rigid_t.block(0,3,3,1);
+			float3 f3n_u = normal[pixelx + pixely * size.x];
+			Eigen::Vector3d n_u(f3n_u.x, f3n_u.y, f3n_u.z);
+			Eigen::Vector3d r_n_u = rigid_t.block(0,0,3,3) * n_u;
+
+			Eigen::Matrix4d non_rigid_t;
+			getWarpMatrix(&non_rigid_t, v_u);
+
+			Eigen::Matrix4d eigenCameraMatrix;
+			matrix4ToEigen(&eigenCameraMatrix, cameraMatrix);
+
+			Eigen::Vector3d v_hat_u = non_rigid_t.block(0,0,3,3) * r_v_u + non_rigid_t.block(0,3,3,1);
+			Eigen::Vector3d projected_u_hat = eigenCameraMatrix.block(0,0,3,3) * v_hat_u + eigenCameraMatrix.block(0,3,3,1);
+			Eigen::Vector3d n_hat_u = non_rigid_t.block(0,0,3,3) * r_n_u;
+
+			Eigen::Vector2i pixel_u;
+
+			pixel_u << int(projected_u_hat[0] / projected_u_hat[2] + 0.5),
+					int(projected_u_hat[1] / projected_u_hat[2] + 0.5);
+			if (pixel_u[0] < 0 || pixel_u[0] > size.x - 1
+					|| pixel_u[1] < 0 || pixel_u[1] > size.y - 1) {
+				continue;
+			}
+			float3 vlf3 = inputVertex[pixel_u[0] + pixel_u[1] * size.x];
+			Eigen::Vector3d vl(vlf3.x, vlf3.y, vlf3.z);
+			data += 0.5 * pow((n_hat_u.transpose() * (v_hat_u - vl))[0], 2);
+		}
+	}
+
+	std::cout << " " << data;
+
+	float energy = reg + w_reg * 2 * data;
+	std::cout << " " << energy << std::endl;
 
 	Eigen::SparseMatrix<double>A_lm(n_dp * 6, n_dp * 6);
 
@@ -379,12 +448,12 @@ bool non_rigid_track(float3* vertex, float3* normal,
 	    return false;
 	}
 
-	std::cout << "solved, - n_dp:" << n_dp << std::endl;
+	//std::cout << "solved, - n_dp:" << n_dp << std::endl;
 	Eigen::VectorXd x_update;
 	Eigen::VectorXd Axb = -1.0f * (w_reg * A_reg.transpose() * b_reg + w_data * A_data.transpose() * b_data);
 	x_update = solver.solve(Axb);
 
-    std::cout<<"norm of x_update = " << x_update.norm()/ (n_dp) << std::endl;
+    //std::cout<<"norm of x_update = " << x_update.norm()/ (n_dp) << std::endl;
 
 	//TODO Set a timer here
 	//std::cout<<"solver time elapsed = " << solver_timer.elapsed() << std::endl;
@@ -421,16 +490,18 @@ bool test_non_rigid_track(float3* vertex, uint2 size, Matrix4 cameraMatrix, floa
 	Matrix4 inv_cur = inverse(cur_pose);
 	matrix4ToEigen(&rigid_t, inv_cur);
 	double avg_diff_norm = 0.0;
+	CVD::Image<u_int16_t>depthmap_n(CVD::ImageRef(size.x,size.y));
 	int unacceptable_n = 0;
 	int pixelx, pixely;
 	for (pixely = 0; pixely < size.y; pixely++) {
 		for (pixelx = 0; pixelx < size.x; pixelx++) {
+			depthmap_n[CVD::ImageRef(pixelx,pixely)] = (u_int16_t)0;
 
 			float3 f3v_u = inverse(pose) * vertex[pixelx + pixely * size.x];
 			Eigen::Vector3d v_u_k(f3v_u.x, f3v_u.y, f3v_u.z);
 
-			Eigen::Matrix4d w; // = Eigen::Matrix4d::Identity();
-			getWarpMatrix(&w, v_u_k);
+			Eigen::Matrix4d w = Eigen::Matrix4d::Identity();
+			//getWarpMatrix(&w, v_u_k);
 
 			v_u_k = w.block(0,0,3,3) * v_u_k + w.block(0,3,3,1);
 			Eigen::Matrix4d eigenCameraMatrix;
@@ -448,10 +519,16 @@ bool test_non_rigid_track(float3* vertex, uint2 size, Matrix4 cameraMatrix, floa
 			Eigen::Vector3d vl(vlf3.x, vlf3.y, vlf3.z);
 			Eigen::Vector3d diff = v_u_k - vl;
 			double norm = diff.norm();
+			depthmap_n[CVD::ImageRef(pixelx,pixely)] = norm * 5000 ;
+
 			avg_diff_norm += norm;
 		}
 	}
-	std::cout << "size: " << size.y * size.x << std::endl;
+
+	char fileName[200];
+	frame_count++;
+	std::sprintf(fileName,"test_diff_%05d.png",frame_count);
+	CVD::img_save(depthmap_n, fileName);
 	std::cout << "average test diff: " << avg_diff_norm/(size.y * size.x) << std::endl;
 }
 
@@ -1054,13 +1131,13 @@ void integrateKernel(Volume vol, const float* depth, uint2 depthSize,
 			for (pix.z = 0; pix.z < vol.size.z;
 					++pix.z, pos += delta) {
 				//++pix.z, pos += delta, cameraX += cameraDelta) {
-				Eigen::Vector3d e_x(pos.x, pos.y, pos.z);
+				Eigen::Vector3d e_x(vol.pos(pix).x, vol.pos(pix).y, vol.pos(pix).z);
 				Eigen::Matrix4d defT;
 				getWarpMatrix(&defT, e_x);
 				Matrix4 m4_w;
 				eigenTomatrix4(m4_w, defT);
 				float3 cameraX = K * (m4_w * pos);
-				//float3 cameraX = K * (pos);
+//				float3 cameraX = K * (pos);
 
 				if (pos.z < 0.0001f) // some near plane constraint
 					continue;
@@ -1078,11 +1155,12 @@ void integrateKernel(Volume vol, const float* depth, uint2 depthSize,
 										1 + sq(pos.x / pos.z)
 												+ sq(pos.y / pos.z));
 				if (diff > -mu) {
-					const float sdf = fminf(1.f, diff / mu);
+					const float sdf = fminf(diff, mu);
 					float2 data = vol[pix];
-					data.x = clamp((data.y * data.x + sdf) / (data.y + 1), -1.f,
+					float w = 1;
+					data.x = clamp((data.y * data.x + sdf * w) / (data.y + w), -1.f,
 							1.f);
-					data.y = fminf(data.y + 1, maxweight);
+					data.y = fminf(data.y + w, maxweight);
 					vol.set(pix, data);
 				}
 			}
@@ -1447,6 +1525,7 @@ bool Kfusion::preprocessing(const ushort * inputDepth, const uint2 inputSize) {
 bool Kfusion::tracking(float4 k, float icp_threshold, uint tracking_rate,
 		uint frame) {
 
+
 	if (frame % tracking_rate != 0)
 		return false;
 
@@ -1509,7 +1588,7 @@ bool Kfusion::tracking(float4 k, float icp_threshold, uint tracking_rate,
 	non_rigid_return |= non_rigid_track(vertex, normal, computationSize, getCameraMatrix(k), inputVertex[0], pose);
 	non_rigid_return |= non_rigid_track(vertex, normal, computationSize, getCameraMatrix(k), inputVertex[0], pose);
 	test_non_rigid_track(vertex, computationSize, getCameraMatrix(k), inputVertex[0], pose);
-	std::cout << "non_rigid tracking end" << std::endl;
+	//std::cout << "non_rigid tracking end" << std::endl;
 }
 
 bool Kfusion::raycasting(float4 k, float mu, uint frame) {

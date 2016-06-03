@@ -188,8 +188,8 @@ public:
 			}
 		} else {
 			char fileNamepng[200];
-			sprintf(fileNamepng,"%s/test_%05d.png",this->_dir.c_str(),_frame + 700);
-			std::cout<<"Trying to read file from: " << fileNamepng << std::endl;
+			sprintf(fileNamepng,"%s/test_%05d.png",this->_dir.c_str(),_frame);
+			//std::cout<<"Trying to read file from: " << fileNamepng << std::endl;
 			CVD::Image<u_int16_t>DEPTHPNG;
 			CVD::img_load(DEPTHPNG, fileNamepng);
 			index = 0;
@@ -197,15 +197,25 @@ public:
 			{
 				for (int u = 0; u < _scenewidth / 2; u++)
 				{
-					depthMap[2 * u + 2 * v * _scenewidth] = ((float)DEPTHPNG[CVD::ImageRef(u,v)])/5000.0f;
-					depthMap[2 * u + (2 * v + 1)* _scenewidth] = ((float)DEPTHPNG[CVD::ImageRef(u,v)])/5000.0f;
-					depthMap[2 * u + 1 + 2 * v * _scenewidth] = ((float)DEPTHPNG[CVD::ImageRef(u,v)])/5000.0f;
-					depthMap[2 * u + 1 + ( 2 * v + 1) * _scenewidth] = ((float)DEPTHPNG[CVD::ImageRef(u,v)])/5000.0f;
-					index++;
-					//std::cout << "v" << v << std::endl;
-					//std::cout << "u" << u << std::endl;
+					if (DEPTHPNG[CVD::ImageRef(u,v)] < 10000) {
+						depthMap[2 * u + 2 * v * _scenewidth] = ((float)DEPTHPNG[CVD::ImageRef(u,v)])/5000.0f;
+						depthMap[2 * u + (2 * v + 1)* _scenewidth] = ((float)DEPTHPNG[CVD::ImageRef(u,v)])/5000.0f;
+						depthMap[2 * u + 1 + 2 * v * _scenewidth] = ((float)DEPTHPNG[CVD::ImageRef(u,v)])/5000.0f;
+						depthMap[2 * u + 1 + ( 2 * v + 1) * _scenewidth] = ((float)DEPTHPNG[CVD::ImageRef(u,v)])/5000.0f;
+						index++;
+					}
 				}
 			}
+//			CVD::img_load(DEPTHPNG, fileNamepng);
+//			index = 0;
+//			for (int v = 0; v < _sceneheight; v++)
+//			{
+//				for (int u = 0; u < _scenewidth; u++)
+//				{
+//					depthMap[2 * u + 2 * v * _scenewidth] = ((float)DEPTHPNG[CVD::ImageRef(u,v)])/5000.0f;
+//					index++;
+//				}
+//			}
 		}
 
 		for (int v = 0; v < _sceneheight; v++) 
@@ -272,7 +282,6 @@ public:
 		fseek(_pFile, size_of_frame * _frame, SEEK_SET);
 
 		if (depthMap) {
-			std::cout << "depth here" << std::endl;
 			total += fread(&(newImageSize), sizeof(newImageSize), 1, _pFile);
 			total += fread(depthMap, sizeof(unsigned short int),
 					newImageSize[0] * newImageSize[1], _pFile);

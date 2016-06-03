@@ -23,8 +23,8 @@ const float farPlane = 4.0f;
 const float delta = 4.0f;
 const int k_n = 3;
 //TDOO need to check mm or cm
-const float eps = 0.5f;
-const float er = 0.000001f;
+const float eps = 0.25f;
+const float er = 0.0001f;
 
 const float3 light = make_float3(1, 1, -1.0);
 const float3 ambient = make_float3(0.1, 0.1, 0.1);
