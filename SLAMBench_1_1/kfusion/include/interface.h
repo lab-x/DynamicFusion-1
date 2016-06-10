@@ -186,26 +186,64 @@ public:
 				depthMap[index] = d;
 				index++;
 			}
+
+			for (int v = 0; v < _sceneheight; v++)
+			{
+				for (int u = 0; u < _scenewidth; u++)
+				{
+					float u_u0_by_fx = (u - _u0) / _focal_x;
+					float v_v0_by_fy = (v - _v0) / _focal_y;
+
+					depthMap[u + v * _scenewidth] = depthMap[u + v * _scenewidth]
+					                                         / std::sqrt(
+					                                        		 u_u0_by_fx * u_u0_by_fx
+					                                        		 + v_v0_by_fy * v_v0_by_fy + 1);
+
+				}
+			}
+
 		} else {
 			char fileNamepng[200];
-			sprintf(fileNamepng,"%s/test_%05d.png",this->_dir.c_str(),_frame);
+			sprintf(fileNamepng,"%s/test_%05d.png",this->_dir.c_str(),_frame + 83);
 			//std::cout<<"Trying to read file from: " << fileNamepng << std::endl;
 			CVD::Image<u_int16_t>DEPTHPNG;
 			CVD::img_load(DEPTHPNG, fileNamepng);
-			index = 0;
-			for (int v = 0; v < _sceneheight / 2 ; v++)
+//			for (int v = 0; v < _sceneheight / 2 ; v++)
+//			{
+//				for (int u = 0; u < _scenewidth / 2; u++)
+//				{
+//					bool inrange = DEPTHPNG[CVD::ImageRef(u,v)] < 8000 && u > 42 && u < 320 - 42 *2;
+//					//bool inrange = true;
+//					depthMap[2 * u + 2 * v * _scenewidth] = inrange ? ((float)DEPTHPNG[CVD::ImageRef(u,v)])/5000.0f : 0;
+//					depthMap[2 * u + (2 * v + 1)* _scenewidth] = inrange ? ((float)DEPTHPNG[CVD::ImageRef(u,v)])/5000.0f : 0;
+//					depthMap[2 * u + 1 + 2 * v * _scenewidth] = inrange ? ((float)DEPTHPNG[CVD::ImageRef(u,v)])/5000.0f : 0;
+//					depthMap[2 * u + 1 + ( 2 * v + 1) * _scenewidth] = inrange ? ((float)DEPTHPNG[CVD::ImageRef(u,v)])/5000.0f : 0;
+//
+//				}
+//			}
+			for (int v = 0; v < _sceneheight ; v++)
 			{
-				for (int u = 0; u < _scenewidth / 2; u++)
+				for (int u = 0; u < _scenewidth; u++)
 				{
-					if (DEPTHPNG[CVD::ImageRef(u,v)] < 10000) {
-						depthMap[2 * u + 2 * v * _scenewidth] = ((float)DEPTHPNG[CVD::ImageRef(u,v)])/5000.0f;
-						depthMap[2 * u + (2 * v + 1)* _scenewidth] = ((float)DEPTHPNG[CVD::ImageRef(u,v)])/5000.0f;
-						depthMap[2 * u + 1 + 2 * v * _scenewidth] = ((float)DEPTHPNG[CVD::ImageRef(u,v)])/5000.0f;
-						depthMap[2 * u + 1 + ( 2 * v + 1) * _scenewidth] = ((float)DEPTHPNG[CVD::ImageRef(u,v)])/5000.0f;
-						index++;
-					}
+					bool inrange = DEPTHPNG[CVD::ImageRef(u,v)] < 8000;
+					depthMap[u + v * _scenewidth] = inrange ? ((float)DEPTHPNG[CVD::ImageRef(u,v)])/5000.0f : 0;
+
+
 				}
 			}
+
+
+//			for (int v = 0; v < _sceneheight / 2 ; v++)
+//			{
+//				for (int u = 0; u < _scenewidth / 2; u++)
+//				{
+//					bool inrange = DEPTHPNG[CVD::ImageRef(u,v)] < 8000 && u > 21 && u < 200;
+//					//bool inrange = true;
+//					depthMap[u + v * _scenewidth] = inrange ? ((float)DEPTHPNG[CVD::ImageRef(u,v)])/5000.0f : 0;
+//
+//				}
+//			}
+
 //			CVD::img_load(DEPTHPNG, fileNamepng);
 //			index = 0;
 //			for (int v = 0; v < _sceneheight; v++)
@@ -218,20 +256,7 @@ public:
 //			}
 		}
 
-		for (int v = 0; v < _sceneheight; v++) 
-		{
-			for (int u = 0; u < _scenewidth; u++) 
-			{
-				float u_u0_by_fx = (u - _u0) / _focal_x;
-				float v_v0_by_fy = (v - _v0) / _focal_y;
-			
-				depthMap[u + v * _scenewidth] = depthMap[u + v * _scenewidth]
-						/ std::sqrt(
-								u_u0_by_fx * u_u0_by_fx
-										+ v_v0_by_fy * v_v0_by_fy + 1);
 
-			}
-		}
 
 	}
 

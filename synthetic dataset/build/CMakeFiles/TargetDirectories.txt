@@ -1,0 +1,1 @@
+/data/yt2012/DynamicFusion/synthetic dataset/build/CMakeFiles/synthetic_data.dir

@@ -1,0 +1,1 @@
+/usr/bin/c++    -g -O3      CMakeFiles/sythetic_data.dir/src/synthetic_dataset.cpp.o  -o sythetic_data -rdynamic 

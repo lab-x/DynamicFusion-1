@@ -1,0 +1,1 @@
+/usr/bin/c++    -g -O3      CMakeFiles/tracking_test.dir/src/tracking_test.cpp.o  -o tracking_test -rdynamic /usr/local/lib/libcvd.so -lcholmod -lamd -lcolamd -lcamd -lccolamd -Wl,-rpath,/usr/local/lib 

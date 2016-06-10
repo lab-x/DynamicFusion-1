@@ -273,6 +273,7 @@ bool non_rigid_track(float3* vertex, float3* normal,
 	Eigen::VectorXd b_data(size.x * size.y);
 	A_data.setZero();
 	int pixelx, pixely;
+	int row = 0;
 //#pragma omp parallel
 //{
 	for (pixely = 0; pixely < size.y; pixely++) {
@@ -284,6 +285,10 @@ bool non_rigid_track(float3* vertex, float3* normal,
 			float3 f3n_u = normal[pixelx + pixely * size.x];
 			Eigen::Vector3d n_u(f3n_u.x, f3n_u.y, f3n_u.z);
 			Eigen::Vector3d r_n_u = rigid_t.block(0,0,3,3) * n_u;
+
+			if (normal[pixelx + pixely * size.x].x == INVALID) {
+				continue;
+			}
 
 			Eigen::Matrix4d non_rigid_t;
 			getWarpMatrix(&non_rigid_t, v_u);
@@ -327,7 +332,7 @@ bool non_rigid_track(float3* vertex, float3* normal,
 			}
 
 			C_n /= eta;
-			C_n.normalize();
+			//C_n.normalize();
 			C_v /= eta;
 
 			Eigen::Vector3d D_v = C_v - vl;
@@ -338,13 +343,24 @@ bool non_rigid_track(float3* vertex, float3* normal,
 				n_i d_p = n_warp[kNear[k]];
 
 				Eigen::Vector3d rn = d_p.se3.block(0,0,3,3) * r_n_u;
-				rn.normalize();
+				//rn.normalize();
 				Eigen::Matrix3d rnm;
-				so3Matrix(&rnm, rn);
+				//so3Matrix(&rnm, rn);
+
+				TooN::SO3<> so3rn (TooN::makeVector(rn[0], rn[1], rn[2]));
+				TooN::Matrix<3,3> so3rnM = so3rn.get_matrix();
+				rnm <<  so3rnM(0,0), so3rnM(0,1), so3rnM(0,2),
+						so3rnM(1,0), so3rnM(1,1), so3rnM(1,2),
+						so3rnM(2,0), so3rnM(2,1), so3rnM(2,2);
 
 				Eigen::Vector3d rv = d_p.se3.block(0,0,3,3) * r_v_u + d_p.se3.block(0,3,3,1);
 				Eigen::Matrix3d rvm;
-				so3Matrix(&rvm, rv);
+				//so3Matrix(&rvm, rv);
+				TooN::SO3<> so3rv (TooN::makeVector(rv[0], rv[1], rv[2]));
+				TooN::Matrix<3,3> so3rvM = so3rv.get_matrix();
+				rnm <<  so3rvM(0,0), so3rvM(0,1), so3rvM(0,2),
+						so3rvM(1,0), so3rvM(1,1), so3rvM(1,2),
+						so3rvM(2,0), so3rvM(2,1), so3rvM(2,2);
 
 				Eigen::RowVector3d c_r = d_p.w * (D_v.transpose() * (-rnm) +
 						C_n.transpose() * (-rvm)) / eta;
@@ -352,17 +368,17 @@ bool non_rigid_track(float3* vertex, float3* normal,
 				Eigen::RowVector3d c_t = d_p.w / eta * C_n.transpose();
 
 				int j = kNear[k];
-				A_data.coeffRef(pixelx + pixely * size.x, j * 6)     = c_r[0];
-				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 1) = c_r[1];
-				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 2) = c_r[2];
+				A_data.coeffRef(row, j * 6)     = c_r[0];
+				A_data.coeffRef(row, j * 6 + 1) = c_r[1];
+				A_data.coeffRef(row, j * 6 + 2) = c_r[2];
 
-				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 3) = c_t[0];
-				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 4) = c_t[1];
-				A_data.coeffRef(pixelx + pixely * size.x, j * 6 + 5) = c_t[2];
+				A_data.coeffRef(row, j * 6 + 3) = c_t[0];
+				A_data.coeffRef(row, j * 6 + 4) = c_t[1];
+				A_data.coeffRef(row, j * 6 + 5) = c_t[2];
 			}
 
-			b_data(pixelx + pixely * size.x) = C_n.transpose() * D_v;
-
+			b_data(row) = C_n.transpose() * D_v;
+			row++;
 		}
 	}
 //}
@@ -429,7 +445,7 @@ bool non_rigid_track(float3* vertex, float3* normal,
 	std::cout << " " << data;
 
 	float energy = reg + w_reg * 2 * data;
-	std::cout << " " << energy << std::endl;
+	std::cout << "energy" << energy << std::endl;
 
 	Eigen::SparseMatrix<double>A_lm(n_dp * 6, n_dp * 6);
 
@@ -437,6 +453,9 @@ bool non_rigid_track(float3* vertex, float3* normal,
 	{
 	    A_lm.insert(i,i) = 1;
 	}
+
+	A_data.conservativeResize(row,n_dp * 6);
+	b_data.conservativeResize(row);
 
 	Eigen::CholmodSimplicialLDLT< Eigen::SparseMatrix<double> >solver;
 	solver.compute(w_reg * A_reg.transpose()*A_reg + w_data * A_data.transpose()*A_data + w_lm * A_lm);
@@ -462,25 +481,45 @@ bool non_rigid_track(float3* vertex, float3* normal,
 	for(int i = 0 ; i < n_dp;i++)
 	{
 	    // Get the rotation update
-	    Eigen::Vector3d so3_i(x_update(6*i+0), x_update(6*i+1), x_update(6*i+2));
+//	    Eigen::Vector3d so3_i(x_update(6*i+0), x_update(6*i+1), x_update(6*i+2));
+//
+//	    // Get the translation update
+//	    Eigen::Vector3d t_i(x_update(6*i+3), x_update(6*i+4), x_update(6*i+5));
 
-	    // Get the translation update
+//	    Eigen::Matrix3d r_i;
+//  	    so3Matrix(&r_i, so3_i);
+	    TooN::Vector<3> so3_i = TooN::makeVector(x_update(6*i+0),
+		                                             x_update(6*i+1),
+		                                             x_update(6*i+2));
+
 	    Eigen::Vector3d t_i(x_update(6*i+3), x_update(6*i+4), x_update(6*i+5));
 
-	    Eigen::Matrix3d r_i;
-  	    so3Matrix(&r_i, so3_i);
+		TooN::Matrix<3,3> rotation_u = TooN::SO3<> (so3_i).get_matrix();
+		Eigen::Matrix3d r_i;
+		r_i <<  rotation_u(0,0), rotation_u(0,1), rotation_u(0,2),
+		  		rotation_u(1,0), rotation_u(1,1), rotation_u(1,2),
+		   		rotation_u(2,0), rotation_u(2,1), rotation_u(2,2);
 
 	    Eigen::Matrix3d o_r = n_warp[i].se3.block(0,0,3,3);
 	    Eigen::Vector3d o_t = n_warp[i].se3.block(0,3,3,1);
 
 	    Eigen::Matrix3d n_r = r_i * o_r;
-	    Eigen::Vector3d n_t = o_t + t_i;
+	    Eigen::Vector3d n_t = t_i + o_t;
 
 	    Eigen::Matrix4d n_w;
 	    n_w << n_r, n_t,
 	    	   0,0,0,1;
 	    n_warp[i].se3 = n_w;
 	    //std::cout<<"pose("<<i<<") = "<< n_w << std::endl;
+//
+//
+//
+//	                translations.at(i)    = translations.at(i) + t_i;
+//
+//	                TooN::SE3<>pose       = TooN::SE3<>(R_matrices.at(i),translations.at(i));
+
+
+
 	}
 	return true;
 }
@@ -497,11 +536,16 @@ bool test_non_rigid_track(float3* vertex, uint2 size, Matrix4 cameraMatrix, floa
 		for (pixelx = 0; pixelx < size.x; pixelx++) {
 			depthmap_n[CVD::ImageRef(pixelx,pixely)] = (u_int16_t)0;
 
-			float3 f3v_u = inverse(pose) * vertex[pixelx + pixely * size.x];
+			float3 f3v_u = vertex[pixelx + pixely * size.x];
 			Eigen::Vector3d v_u_k(f3v_u.x, f3v_u.y, f3v_u.z);
 
-			Eigen::Matrix4d w = Eigen::Matrix4d::Identity();
-			//getWarpMatrix(&w, v_u_k);
+			Eigen::Matrix4d w; // = Eigen::Matrix4d::Identity();
+			getWarpMatrix(&w, v_u_k);
+
+			f3v_u = inverse(pose) * f3v_u;
+			v_u_k[0] = f3v_u.x;
+			v_u_k[1] = f3v_u.y;
+			v_u_k[2] = f3v_u.z;
 
 			v_u_k = w.block(0,0,3,3) * v_u_k + w.block(0,3,3,1);
 			Eigen::Matrix4d eigenCameraMatrix;
@@ -1122,49 +1166,48 @@ void integrateKernel(Volume vol, const float* depth, uint2 depthSize,
 #pragma omp parallel for \
         shared(vol), private(y)
 	for (y = 0; y < vol.size.y; y++)
-		for (unsigned int x = 0; x < vol.size.x; x++) {
+			for (unsigned int x = 0; x < vol.size.x; x++) {
 
-			uint3 pix = make_uint3(x, y, 0); //pix.x = x;pix.y = y;
-			float3 pos = invTrack * vol.pos(pix);
-			//float3 cameraX = K * pos;
+				uint3 pix = make_uint3(x, y, 0); //pix.x = x;pix.y = y;
+				float3 pos = invTrack * vol.pos(pix);
+				//float3 cameraX = K * pos;
 
-			for (pix.z = 0; pix.z < vol.size.z;
-					++pix.z, pos += delta) {
-				//++pix.z, pos += delta, cameraX += cameraDelta) {
-				Eigen::Vector3d e_x(vol.pos(pix).x, vol.pos(pix).y, vol.pos(pix).z);
-				Eigen::Matrix4d defT;
-				getWarpMatrix(&defT, e_x);
-				Matrix4 m4_w;
-				eigenTomatrix4(m4_w, defT);
-				float3 cameraX = K * (m4_w * pos);
-//				float3 cameraX = K * (pos);
+				for (pix.z = 0; pix.z < vol.size.z;
+						++pix.z, pos += delta) {
+					//++pix.z, pos += delta, cameraX += cameraDelta) {
+					Eigen::Vector3d e_x(vol.pos(pix).x, vol.pos(pix).y, vol.pos(pix).z);
+					Eigen::Matrix4d defT;
+					getWarpMatrix(&defT, e_x);
+					Matrix4 m4_w;
+					eigenTomatrix4(m4_w, defT);
+					float3 cameraX = K * (m4_w * pos);
+				//	float3 cameraX = K * (pos);
 
-				if (pos.z < 0.0001f) // some near plane constraint
-					continue;
-				const float2 pixel = make_float2(cameraX.x / cameraX.z + 0.5f,
-						cameraX.y / cameraX.z + 0.5f);
-				if (pixel.x < 0 || pixel.x > depthSize.x - 1 || pixel.y < 0
-						|| pixel.y > depthSize.y - 1)
-					continue;
-				const uint2 px = make_uint2(pixel.x, pixel.y);
-				if (depth[px.x + px.y * depthSize.x] == 0)
-					continue;
-				const float diff =
-						(depth[px.x + px.y * depthSize.x] - cameraX.z)
-								* std::sqrt(
-										1 + sq(pos.x / pos.z)
-												+ sq(pos.y / pos.z));
-				if (diff > -mu) {
-					const float sdf = fminf(diff, mu);
-					float2 data = vol[pix];
-					float w = 1;
-					data.x = clamp((data.y * data.x + sdf * w) / (data.y + w), -1.f,
-							1.f);
-					data.y = fminf(data.y + w, maxweight);
-					vol.set(pix, data);
+					if (pos.z < 0.0001f) // some near plane constraint
+						continue;
+					const float2 pixel = make_float2(cameraX.x / cameraX.z + 0.5f,
+							cameraX.y / cameraX.z + 0.5f);
+					if (pixel.x < 0 || pixel.x > depthSize.x - 1 || pixel.y < 0
+							|| pixel.y > depthSize.y - 1)
+						continue;
+					const uint2 px = make_uint2(pixel.x, pixel.y);
+					if (depth[px.x + px.y * depthSize.x] == 0)
+						continue;
+					const float diff =
+							(depth[px.x + px.y * depthSize.x] - cameraX.z)
+									* std::sqrt(
+											1 + sq(pos.x / pos.z)
+													+ sq(pos.y / pos.z));
+					if (diff > -mu) {
+						const float sdf = fminf(1.f, diff / mu);
+						float2 data = vol[pix];
+						data.x = clamp((data.y * data.x + sdf) / (data.y + 1), -1.f,
+								1.f);
+						data.y = fminf(data.y + 1, maxweight);
+						vol.set(pix, data);
+					}
 				}
 			}
-		}
 	std::cout << "integrate kernel ends" << std::endl;
 	TOCK("integrateKernel", vol.size.x * vol.size.y);
 //	for (y = 0; y < vol.size.y; y++)
@@ -1581,14 +1624,13 @@ bool Kfusion::tracking(float4 k, float icp_threshold, uint tracking_rate,
 	for(int i = 0; i < n_warp.size(); i++) {
 		n_warp[i].se3 = Eigen::Matrix4d::Identity();
 	}
+	bool non_rigid_return = false;
+	for (int i = 0; i < 5; i++) {
+		non_rigid_return = non_rigid_track(vertex, normal, computationSize, getCameraMatrix(k), inputVertex[0], pose);
+		test_non_rigid_track(vertex, computationSize, getCameraMatrix(k), inputVertex[0], pose);
 
-	bool non_rigid_return = non_rigid_track(vertex, normal, computationSize, getCameraMatrix(k), inputVertex[0], pose);
-	non_rigid_return |= non_rigid_track(vertex, normal, computationSize, getCameraMatrix(k), inputVertex[0], pose);
-	non_rigid_return |= non_rigid_track(vertex, normal, computationSize, getCameraMatrix(k), inputVertex[0], pose);
-	non_rigid_return |= non_rigid_track(vertex, normal, computationSize, getCameraMatrix(k), inputVertex[0], pose);
-	non_rigid_return |= non_rigid_track(vertex, normal, computationSize, getCameraMatrix(k), inputVertex[0], pose);
-	test_non_rigid_track(vertex, computationSize, getCameraMatrix(k), inputVertex[0], pose);
-	//std::cout << "non_rigid tracking end" << std::endl;
+	}
+	std::cout << "non_rigid tracking end" << std::endl;
 }
 
 bool Kfusion::raycasting(float4 k, float mu, uint frame) {

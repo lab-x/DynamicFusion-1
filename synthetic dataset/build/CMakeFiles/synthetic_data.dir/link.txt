@@ -1,0 +1,1 @@
+/usr/bin/c++    -g -O3      CMakeFiles/synthetic_data.dir/src/synthetic_dataset.cpp.o  -o synthetic_data -rdynamic /usr/local/lib/libcvd.so -Wl,-rpath,/usr/local/lib 
