@@ -26,6 +26,8 @@ struct n_i {
 
 std::vector<n_i> n_warp;
 
+void crossProductMatrix(Eigen::Matrix3d* rm, Eigen::Vector3d v);
+
 void findKnearestPointIndex(int* out, std::vector<n_i>& n_warp, Eigen::Vector3d x, int index) {
 	int n_size = n_warp.size();
 	int checked = 0;
@@ -119,6 +121,11 @@ void so3Matrix(Eigen::Matrix3d* rm, Eigen::Vector3d v) {
 	*rm << 1, -v[2], v[1],
 	v[2], 1, -v[0],
 	-v[1], v[0], 1;
+}
+void crossProductMatrix(Eigen::Matrix3d* rm, Eigen::Vector3d v) {
+	*rm << 0, -v[2], v[1],
+	v[2], 0, -v[0],
+	-v[1], v[0], 0;
 }
 
 bool non_rigid_track(Eigen::Vector3d* vertex, Eigen::Vector3d* normal,
@@ -286,14 +293,14 @@ bool non_rigid_track(Eigen::Vector3d* vertex, Eigen::Vector3d* normal,
 				Eigen::Vector3d rn = d_p.se3.block(0,0,3,3) * r_n_u;
 				rn.normalize();
 				Eigen::Matrix3d rnm;
-				so3Matrix(&rnm, rn);
+				crossProductMatrix(&rnm, rn);
 
 				Eigen::Vector3d rv = d_p.se3.block(0,0,3,3) * r_v_u + d_p.se3.block(0,3,3,1);
 				Eigen::Matrix3d rvm;
-				so3Matrix(&rvm, rv);
+				crossProductMatrix(&rvm, rv);
 
-				Eigen::RowVector3d c_r = d_p.w * (D_v.transpose() * (rnm) +
-						C_n.transpose() * (rvm)) / eta;
+				Eigen::RowVector3d c_r = d_p.w * (D_v.transpose() * (-rnm) +
+						C_n.transpose() * (-rvm)) / eta;
 
 				Eigen::RowVector3d c_t = d_p.w / eta * C_n.transpose();
 
@@ -308,13 +315,6 @@ bool non_rigid_track(Eigen::Vector3d* vertex, Eigen::Vector3d* normal,
 			}
 
 			b_data(row) = C_n.transpose() * D_v;
-			if (isnan(C_n.transpose() * D_v)) {
-				std::cout << "C_n_t" << C_n_t << std::endl;
-				std::cout << "eta" << eta << std::endl;
-				std::cout << "r_n_u" << r_n_u << std::endl;
-				//std::cout << "D_v" << D_v << std::endl;
-
-			}
 			row ++;
 		}
 	}

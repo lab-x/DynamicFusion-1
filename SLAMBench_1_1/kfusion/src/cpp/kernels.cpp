@@ -74,7 +74,7 @@ bool non_rigid_track(float3* vertex, float3* normal, uint2 size,
 void matrix4ToEigen(Eigen::Matrix4d* o, Matrix4 i);
 void eigenTomatrix4(Matrix4& o, Eigen::Matrix4d i);
 void so3Matrix(Eigen::Matrix3d* rm, Eigen::Vector3d v);
-void so3Matrix(Eigen::Matrix3d* rm, Eigen::Vector3d v);
+void crossProductMatrix(Eigen::Matrix3d* rm, Eigen::Vector3d v);
 bool test_non_rigid_track(float3* vertex, uint2 size, Matrix4 cameraMatrix,
 		float3* inputVertex, Matrix4 pose);
 
@@ -225,15 +225,15 @@ bool non_rigid_track(float3* vertex, float3* normal,
 			//std::cout << "rigid_t.block(0,0,3,3) " << k << "  " << rigid_t.block(0,0,3,3)  << std::endl;
 
 			A_reg.coeffRef((i * k_n + k)*3, i * 6) = 0;
-			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6)      = -con_a * ridgv[2];
-			A_reg.coeffRef((i * k_n + k)*3 + 2, i * 6)      = con_a * ridgv[1];
+			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6)      = con_a * ridgv[2];
+			A_reg.coeffRef((i * k_n + k)*3 + 2, i * 6)      = -con_a * ridgv[1];
 
-			A_reg.coeffRef((i * k_n + k)*3, i * 6 + 1)      = con_a * ridgv[2];
+			A_reg.coeffRef((i * k_n + k)*3, i * 6 + 1)      = -con_a * ridgv[2];
 			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6 + 1)  = 0;
-			A_reg.coeffRef((i * k_n + k)*3 + 2, i * 6 + 1)  = -con_a * ridgv[0];
+			A_reg.coeffRef((i * k_n + k)*3 + 2, i * 6 + 1)  = con_a * ridgv[0];
 
-			A_reg.coeffRef((i * k_n + k)*3, i * 6 + 2)      = -con_a * ridgv[1];
-			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6 + 2)  = con_a * ridgv[0];
+			A_reg.coeffRef((i * k_n + k)*3, i * 6 + 2)      = con_a * ridgv[1];
+			A_reg.coeffRef((i * k_n + k)*3 + 1, i * 6 + 2)  = -con_a * ridgv[0];
 			A_reg.coeffRef((i * k_n + k)*3 + 2, i*6 + 2)    = 0;
 
 			A_reg.coeffRef((i * k_n + k)*3, i * 6 + 3)      = con_a;
@@ -243,15 +243,15 @@ bool non_rigid_track(float3* vertex, float3* normal,
 			Eigen::Vector3d rjdgv = non_rigid_t_j.block(0,0,3,3) * n_warp[j].v;
 
 			A_reg.coeffRef((i * k_n + k)*3, j * 6)          = 0;
-			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6)      = con_a * rjdgv[2];
-			A_reg.coeffRef((i * k_n + k)*3 + 2, j * 6)      = -con_a * rjdgv[1];
+			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6)      = -con_a * rjdgv[2];
+			A_reg.coeffRef((i * k_n + k)*3 + 2, j * 6)      = con_a * rjdgv[1];
 
-			A_reg.coeffRef((i * k_n + k)*3, j * 6 + 1)      = -con_a * rjdgv[2];
+			A_reg.coeffRef((i * k_n + k)*3, j * 6 + 1)      = con_a * rjdgv[2];
 			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6 + 1)  = 0;
-			A_reg.coeffRef((i * k_n + k)*3 + 2, j*6 + 1)    = con_a * rjdgv[0];
+			A_reg.coeffRef((i * k_n + k)*3 + 2, j*6 + 1)    = -con_a * rjdgv[0];
 
-			A_reg.coeffRef((i * k_n + k)*3, j * 6 + 2)      = con_a * rjdgv[1];
-			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6 + 2)  = -con_a * rjdgv[0];
+			A_reg.coeffRef((i * k_n + k)*3, j * 6 + 2)      = -con_a * rjdgv[1];
+			A_reg.coeffRef((i * k_n + k)*3 + 1, j * 6 + 2)  = con_a * rjdgv[0];
 			A_reg.coeffRef((i * k_n + k)*3 + 2, j * 6 + 2)  = 0;
 
 			A_reg.coeffRef((i * k_n + k)*3, j * 6 + 3)      = -con_a;
@@ -298,8 +298,6 @@ bool non_rigid_track(float3* vertex, float3* normal,
 
 			Eigen::Vector3d v_hat_u = non_rigid_t.block(0,0,3,3) * r_v_u + non_rigid_t.block(0,3,3,1); // Non_rigid warp is initialised to be Identity
 			Eigen::Vector3d projected_u_hat = eigenCameraMatrix.block(0,0,3,3) * v_hat_u + eigenCameraMatrix.block(0,3,3,1);
-			//Eigen::Vector3d projected_u_hat = eigenCameraMatrix.block(0,0,3,3) * (w.block(0,0,3,3) * v_u + w.block(0,3,3,1))
-			//		+ eigenCameraMatrix.block(0,3,3,1);
 			Eigen::Vector2i pixel_u;
 
 			pixel_u << int(projected_u_hat[0] / projected_u_hat[2] + 0.5),
@@ -327,7 +325,7 @@ bool non_rigid_track(float3* vertex, float3* normal,
 			for (int k = 0; k < k_n; k++) {
 				n_i d_p = n_warp[kNear[k]];
 				C_n += d_p.w * d_p.se3.block(0,0,3,3) * r_n_u;
-				C_v += d_p.w * d_p.se3.block(0,0,3,3) * r_v_u + d_p.se3.block(0,3,3,1);
+				C_v += d_p.w * (d_p.se3.block(0,0,3,3) * r_v_u + d_p.se3.block(0,3,3,1));
 				eta += d_p.w;
 			}
 
@@ -345,27 +343,16 @@ bool non_rigid_track(float3* vertex, float3* normal,
 				Eigen::Vector3d rn = d_p.se3.block(0,0,3,3) * r_n_u;
 				//rn.normalize();
 				Eigen::Matrix3d rnm;
-				//so3Matrix(&rnm, rn);
+				crossProductMatrix(&rnm, rn);
 
-				TooN::SO3<> so3rn (TooN::makeVector(rn[0], rn[1], rn[2]));
-				TooN::Matrix<3,3> so3rnM = so3rn.get_matrix();
-				rnm <<  so3rnM(0,0), so3rnM(0,1), so3rnM(0,2),
-						so3rnM(1,0), so3rnM(1,1), so3rnM(1,2),
-						so3rnM(2,0), so3rnM(2,1), so3rnM(2,2);
-
-				Eigen::Vector3d rv = d_p.se3.block(0,0,3,3) * r_v_u + d_p.se3.block(0,3,3,1);
+				Eigen::Vector3d rv = d_p.se3.block(0,0,3,3) * rigid_t.block(0,0,3,3) * v_u;
 				Eigen::Matrix3d rvm;
-				//so3Matrix(&rvm, rv);
-				TooN::SO3<> so3rv (TooN::makeVector(rv[0], rv[1], rv[2]));
-				TooN::Matrix<3,3> so3rvM = so3rv.get_matrix();
-				rnm <<  so3rvM(0,0), so3rvM(0,1), so3rvM(0,2),
-						so3rvM(1,0), so3rvM(1,1), so3rvM(1,2),
-						so3rvM(2,0), so3rvM(2,1), so3rvM(2,2);
+				crossProductMatrix(&rvm, rv);
 
 				Eigen::RowVector3d c_r = d_p.w * (D_v.transpose() * (-rnm) +
 						C_n.transpose() * (-rvm)) / eta;
 
-				Eigen::RowVector3d c_t = d_p.w / eta * C_n.transpose();
+				Eigen::RowVector3d c_t = (d_p.w / eta) * C_n.transpose();
 
 				int j = kNear[k];
 				A_data.coeffRef(row, j * 6)     = c_r[0];
@@ -377,7 +364,7 @@ bool non_rigid_track(float3* vertex, float3* normal,
 				A_data.coeffRef(row, j * 6 + 5) = c_t[2];
 			}
 
-			b_data(row) = C_n.transpose() * D_v;
+			b_data(row) = (C_n.transpose() * D_v)[0];
 			row++;
 		}
 	}
@@ -385,7 +372,7 @@ bool non_rigid_track(float3* vertex, float3* normal,
 
 	float w_data = 0.5;
 	float w_reg = 100;
-	float w_lm = 1E-12;
+	float w_lm = 0;
 
 	float reg = 0;
 	for (int i = 0; i < n_dp; i ++) {
@@ -481,45 +468,24 @@ bool non_rigid_track(float3* vertex, float3* normal,
 	for(int i = 0 ; i < n_dp;i++)
 	{
 	    // Get the rotation update
-//	    Eigen::Vector3d so3_i(x_update(6*i+0), x_update(6*i+1), x_update(6*i+2));
-//
-//	    // Get the translation update
-//	    Eigen::Vector3d t_i(x_update(6*i+3), x_update(6*i+4), x_update(6*i+5));
+	    Eigen::Vector3d so3_i(x_update(6*i+0), x_update(6*i+1), x_update(6*i+2));
 
-//	    Eigen::Matrix3d r_i;
-//  	    so3Matrix(&r_i, so3_i);
-	    TooN::Vector<3> so3_i = TooN::makeVector(x_update(6*i+0),
-		                                             x_update(6*i+1),
-		                                             x_update(6*i+2));
-
+	    // Get the translation update
 	    Eigen::Vector3d t_i(x_update(6*i+3), x_update(6*i+4), x_update(6*i+5));
 
-		TooN::Matrix<3,3> rotation_u = TooN::SO3<> (so3_i).get_matrix();
-		Eigen::Matrix3d r_i;
-		r_i <<  rotation_u(0,0), rotation_u(0,1), rotation_u(0,2),
-		  		rotation_u(1,0), rotation_u(1,1), rotation_u(1,2),
-		   		rotation_u(2,0), rotation_u(2,1), rotation_u(2,2);
+	    Eigen::Matrix3d r_i;
+  	    so3Matrix(&r_i, so3_i);
 
 	    Eigen::Matrix3d o_r = n_warp[i].se3.block(0,0,3,3);
 	    Eigen::Vector3d o_t = n_warp[i].se3.block(0,3,3,1);
 
-	    Eigen::Matrix3d n_r = r_i * o_r;
-	    Eigen::Vector3d n_t = t_i + o_t;
+	    Eigen::Matrix3d n_r = (0.1 * o_r) * r_i;
+	    Eigen::Vector3d n_t = (0.1 * t_i) + o_t;
 
 	    Eigen::Matrix4d n_w;
 	    n_w << n_r, n_t,
 	    	   0,0,0,1;
 	    n_warp[i].se3 = n_w;
-	    //std::cout<<"pose("<<i<<") = "<< n_w << std::endl;
-//
-//
-//
-//	                translations.at(i)    = translations.at(i) + t_i;
-//
-//	                TooN::SE3<>pose       = TooN::SE3<>(R_matrices.at(i),translations.at(i));
-
-
-
 	}
 	return true;
 }
@@ -573,13 +539,19 @@ bool test_non_rigid_track(float3* vertex, uint2 size, Matrix4 cameraMatrix, floa
 	frame_count++;
 	std::sprintf(fileName,"test_diff_%05d.png",frame_count);
 	CVD::img_save(depthmap_n, fileName);
-	std::cout << "average test diff: " << avg_diff_norm/(size.y * size.x) << std::endl;
+	//std::cout << "average test diff: " << avg_diff_norm/(size.y * size.x) << std::endl;
 }
 
 void so3Matrix(Eigen::Matrix3d* rm, Eigen::Vector3d v) {
 	*rm << 1, -v[2], v[1],
 	v[2], 1, -v[0],
 	-v[1], v[0], 1;
+}
+
+void crossProductMatrix(Eigen::Matrix3d* rm, Eigen::Vector3d v) {
+	*rm << 0, -v[2], v[1],
+	v[2], 0, -v[0],
+	-v[1], v[0], 0;
 }
 
 void matrix4ToEigen(Eigen::Matrix4d* o, Matrix4 i) {
@@ -1625,11 +1597,11 @@ bool Kfusion::tracking(float4 k, float icp_threshold, uint tracking_rate,
 		n_warp[i].se3 = Eigen::Matrix4d::Identity();
 	}
 	bool non_rigid_return = false;
-	for (int i = 0; i < 5; i++) {
-		non_rigid_return = non_rigid_track(vertex, normal, computationSize, getCameraMatrix(k), inputVertex[0], pose);
+	for (int i = 0; i < 9; i++) {
 		test_non_rigid_track(vertex, computationSize, getCameraMatrix(k), inputVertex[0], pose);
-
+		non_rigid_return = non_rigid_track(vertex, normal, computationSize, getCameraMatrix(k), inputVertex[0], pose);
 	}
+	test_non_rigid_track(vertex, computationSize, getCameraMatrix(k), inputVertex[0], pose);
 	std::cout << "non_rigid tracking end" << std::endl;
 }
 
