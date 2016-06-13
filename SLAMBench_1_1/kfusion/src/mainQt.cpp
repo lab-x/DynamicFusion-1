@@ -248,12 +248,12 @@ int processAll(DepthReader *reader, bool processFrame, bool renderImages,
 				(processFrame ? reader->getFrameNumber() - frameOffset : 0),
 				config->rendering_rate, camera, 0.75 * config->mu);
 		timings[6] = tock();
-		CVD::Image< CVD::Rgb<CVD::byte> >depthmap(CVD::ImageRef(320,240));
-		for(int i=0; i< 240; i++)
+		CVD::Image< CVD::Rgb<CVD::byte> >depthmap(CVD::ImageRef(640,480));
+		for(int i=0; i< 480; i++)
 		{
-			for(int j=0; j< 320; j++)
+			for(int j=0; j< 640; j++)
 			{
-				CVD::Rgb<CVD::byte> colour(volumeRender[i*320 + j].x, volumeRender[i*320 + j].y, volumeRender[i*320 + j].z);
+				CVD::Rgb<CVD::byte> colour(volumeRender[i*640 + j].x, volumeRender[i*640 + j].y, volumeRender[i*640 + j].z);
 				depthmap[CVD::ImageRef(j,i)] = colour;
 			}
 		}

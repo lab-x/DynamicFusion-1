@@ -221,14 +221,14 @@ public:
 //
 //				}
 //			}
+			int depthScale = 5000;
+
 			for (int v = 0; v < _sceneheight ; v++)
 			{
 				for (int u = 0; u < _scenewidth; u++)
 				{
-					bool inrange = DEPTHPNG[CVD::ImageRef(u,v)] < 8000;
+					bool inrange = DEPTHPNG[CVD::ImageRef(u,v)] < 1.6 * depthScale;
 					depthMap[u + v * _scenewidth] = inrange ? ((float)DEPTHPNG[CVD::ImageRef(u,v)])/5000.0f : 0;
-
-
 				}
 			}
 
